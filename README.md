@@ -3,10 +3,14 @@
 A living memory garden for **Lina 🌸 & Thiha 🌙** — one rose blooms for every
 day since **13 April 2024**.
 
-- **The garden** — a twilight island you can orbit. Roses grow in a spiral, one
-  per day (day 1 is the very heart). Milestone days bloom gold. Today's rose
-  glows pink. Fireflies, drifting petals, wind in the grass — the grass uses
-  your own stylized-grass meshes and a port of your Godot grass shader.
+- **The garden** — a twilight island in a quiet sea, ringed by big snow-capped
+  mountains (she likes mountains). Roses grow in a spiral, one per day (day 1
+  is the very heart). Milestone days bloom gold. Today's rose glows pink.
+  Fireflies, drifting petals, wind in the grass — the grass uses your own
+  stylized-grass meshes and a port of your Godot grass shader. Flower
+  arrangements from your pack sit by the sign, the stump, the lantern and the
+  shore — and one single rose lies on the stump beside the book. The sea has
+  slow waves, foam where it meets the island, and a path of moonlight.
 - **The book** (tap the book on the stump) — a two-page journal you both write
   in, with moods, signatures, milestones, and a list of what was
   *kept in smoke*.
@@ -111,6 +115,14 @@ The rose spiral scales itself: day 826 sits ~10 units from the heart, day 2000
 ## Credits
 
 - **Book model** — "Low Poly Book" by **Tekila** (`public/assets/book/LICENSE.txt`)
+- **Mountains** — "Free Winter Mountain 3D Low Poly Models" by **CraftPix**
+  (`public/assets/mountains/LICENSE.txt`, craftpix.net file license)
+- **Flower arrangements** — by **Loafbrr** (loafbrr.itch.io) — see
+  `public/assets/flowers/CREDITS.txt`; a donation to them is a lovely gesture
+- **The sea** — written for this garden (your SeaWaterMaterial zip is
+  password-protected, so the waves, foam and moon-glint are a custom shader in
+  `public/js/garden.js`; send the password and it can be swapped for a port of
+  the original)
 - **Grass meshes & shader** — yours; the Godot `.gdshader` (root→tip gradient ×
   world-noise patches) was ported into the Three.js material (`public/assets/grass/license.txt`)
 - **Trees, bushes, rocks, flowers** — **Quaternius Ultimate Nature Pack**, CC0

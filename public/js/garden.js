@@ -96,16 +96,16 @@ export function createGarden(canvas, opts = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x2a1b3d, 36, 150);
+  scene.fog = new THREE.Fog(0x241a3e, 60, 620);
 
-  const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 400);
-  camera.position.set(0, 26, 44);
+  const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 1400);
+  camera.position.set(0, 34, 86);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 1.7, 0);
   controls.enableDamping = true; controls.dampingFactor = 0.06;
   controls.enablePan = false;
-  controls.minDistance = 8; controls.maxDistance = 36;
+  controls.minDistance = 8; controls.maxDistance = 48;
   controls.minPolarAngle = 0.4; controls.maxPolarAngle = 1.42;
   controls.autoRotate = !reduced; controls.autoRotateSpeed = 0.22;
   controls.enabled = false;
@@ -126,7 +126,7 @@ export function createGarden(canvas, opts = {}) {
 
   /* ------------- sky, moon, stars ------------- */
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(180, 24, 18),
+    new THREE.SphereGeometry(760, 28, 20),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: {
@@ -152,7 +152,7 @@ export function createGarden(canvas, opts = {}) {
     const n = 520, pos = new Float32Array(n * 3);
     const rnd = mulberry(42);
     for (let i = 0; i < n; i++) {
-      const a = rnd() * Math.PI * 2, e = Math.asin(0.12 + rnd() * 0.86), r = 172;
+      const a = rnd() * Math.PI * 2, e = Math.asin(0.12 + rnd() * 0.86), r = 700;
       pos[i * 3] = Math.cos(a) * Math.cos(e) * r;
       pos[i * 3 + 1] = Math.sin(e) * r;
       pos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
@@ -160,16 +160,16 @@ export function createGarden(canvas, opts = {}) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const stars = new THREE.Points(g, new THREE.PointsMaterial({
-      size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0.85,
+      size: 1.7, sizeAttenuation: false, transparent: true, opacity: 0.85,
       color: 0xfff6e0, map: softCircleTex(), depthWrite: false, fog: false,
     }));
     scene.add(stars);
   }
 
   const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: softCircleTex('#fdf4da', 'rgba(253,244,218,0)'), fog: false, depthWrite: false }));
-  moon.scale.setScalar(11); moon.position.set(-52, 46, -92); scene.add(moon);
+  moon.scale.setScalar(38); moon.position.set(-180, 158, -318); scene.add(moon);
   const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softCircleTex('rgba(253,244,218,.4)', 'rgba(253,244,218,0)'), fog: false, depthWrite: false, opacity: 0.5 }));
-  moonHalo.scale.setScalar(30); moonHalo.position.copy(moon.position); scene.add(moonHalo);
+  moonHalo.scale.setScalar(102); moonHalo.position.copy(moon.position); scene.add(moonHalo);
 
   /* ------------- the island ------------- */
   const R = 26;
@@ -196,12 +196,110 @@ export function createGarden(canvas, opts = {}) {
     scene.add(ground);
 
     const skirt = new THREE.Mesh(
-      new THREE.CylinderGeometry(R, R + 2.4, 3.2, 72, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x3a2c26, roughness: 1 })
+      new THREE.CylinderGeometry(R, R + 2.6, 5.6, 72, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x2e2420, roughness: 1 })
     );
-    skirt.position.y = -1.6; scene.add(skirt);
-    const bottom = new THREE.Mesh(new THREE.CircleGeometry(R + 2.4, 72), new THREE.MeshBasicMaterial({ color: 0x12101f }));
-    bottom.rotation.x = Math.PI / 2; bottom.position.y = -3.2; scene.add(bottom);
+    skirt.position.y = -2.8; scene.add(skirt);
+  }
+
+  /* ------------- the sea ------------- */
+  const SEA_Y = -1.15;
+  const seaUniforms = {
+    uTime: { value: 0 },
+    uDeep: { value: new THREE.Color(0x131b36) },
+    uShallow: { value: new THREE.Color(0x2c4a63) },
+    uHorizon: { value: new THREE.Color(0x5a4270) },
+    uFoam: { value: new THREE.Color(0xe9eff1) },
+    uGlint: { value: new THREE.Color(0xffe2b8) },
+    uMoonDir: { value: new V3(-180, 158, -318).normalize() },
+    uIslandR: { value: R },
+    uFogColor: { value: scene.fog.color },
+    uFogNear: { value: scene.fog.near },
+    uFogFar: { value: scene.fog.far },
+    uAmp: { value: reduced ? 0.06 : 0.22 },
+  };
+  {
+    const seg = isMobile ? 120 : 176;
+    const g = new THREE.PlaneGeometry(1500, 1500, seg, seg);
+    g.rotateX(-Math.PI / 2);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: seaUniforms,
+      vertexShader: `
+        uniform float uTime, uAmp;
+        varying vec3 vW; varying vec3 vN;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){
+          vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
+        }
+        float waveH(vec2 p, float t){
+          float h = 0.0;
+          h += sin(dot(p, vec2(0.16, 0.05)) + t * 0.9) * 0.55;
+          h += sin(dot(p, vec2(-0.07, 0.19)) + t * 1.25) * 0.34;
+          h += sin(dot(p, vec2(0.045, -0.11)) + t * 0.6) * 0.45;
+          h += (gn(p * 0.22 + t * 0.07) - 0.5) * 1.1;
+          h += (gn(p * 0.55 - t * 0.05) - 0.5) * 0.45;
+          return h;
+        }
+        void main(){
+          vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+          float d = length(wp.xz);
+          float damp = clamp(1.0 - d / 260.0, 0.12, 1.0);
+          float t = uTime;
+          float h = waveH(wp.xz, t) * uAmp * damp;
+          float e = 0.9;
+          float hx = waveH(wp.xz + vec2(e, 0.0), t) * uAmp * damp;
+          float hz = waveH(wp.xz + vec2(0.0, e), t) * uAmp * damp;
+          vN = normalize(vec3(h - hx, e, h - hz));
+          wp.y += h;
+          vW = wp;
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+        }`,
+      fragmentShader: `
+        uniform float uTime, uIslandR, uFogNear, uFogFar;
+        uniform vec3 uDeep, uShallow, uHorizon, uFoam, uGlint, uMoonDir, uFogColor;
+        varying vec3 vW; varying vec3 vN;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){
+          vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
+        }
+        void main(){
+          vec3 N = normalize(vN);
+          vec3 Vv = cameraPosition - vW;
+          float viewDist = length(Vv);
+          vec3 V = Vv / viewDist;
+          float dC = length(vW.xz);
+
+          float shore = smoothstep(uIslandR + 16.0, uIslandR - 2.0, dC);
+          vec3 col = mix(uDeep, uShallow, shore * 0.85 + 0.08);
+
+          float fres = pow(1.0 - clamp(dot(V, N), 0.0, 1.0), 3.0);
+          col = mix(col, uHorizon, fres * 0.55);
+
+          /* moonlight on the water */
+          vec3 Hh = normalize(uMoonDir + V);
+          float spec = pow(clamp(dot(N, Hh), 0.0, 1.0), 260.0);
+          float sparkle = step(0.986, gn(vW.xz * 3.1 + uTime * 0.6)) * spec * 8.0;
+          col += uGlint * (spec * 1.6 + sparkle);
+
+          /* foam: a breathing ring where the sea meets the island, plus wave crests */
+          float ring = smoothstep(uIslandR + 3.0, uIslandR + 0.5, dC) * smoothstep(uIslandR - 1.5, uIslandR + 0.6, dC);
+          float lap = 0.55 + 0.45 * sin(uTime * 1.4 + gn(vW.xz * 1.7) * 6.2831);
+          float foamRing = ring * lap * (0.45 + 0.55 * gn(vW.xz * 2.6 + uTime * 0.32));
+          float crest = smoothstep(0.14, 0.30, vW.y + 1.15) * (1.0 - smoothstep(60.0, 200.0, dC)) * 0.4
+                      * gn(vW.xz * 1.3 - uTime * 0.22);
+          col = mix(col, uFoam, clamp(foamRing + crest, 0.0, 0.85));
+
+          float fogF = smoothstep(uFogNear, uFogFar, viewDist);
+          col = mix(col, uFogColor, fogF);
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    });
+    const sea = new THREE.Mesh(g, mat);
+    sea.position.y = SEA_Y;
+    sea.frustumCulled = false;
+    scene.add(sea);
   }
 
   const keepOut = [];                              // {x,z,r} grass/rose exclusion
@@ -583,6 +681,13 @@ export function createGarden(canvas, opts = {}) {
   const photosAnchor = new THREE.Group(); lineGroup.add(photosAnchor);
   const photoCards = [];
 
+  let assetsPending = 5;      // nature kit, mountains, flowers, grass ×2
+  const assetDone = () => { if (--assetsPending <= 0) beginIntro(); };
+  setTimeout(() => { if (!ready) beginIntro(); }, 12000);   // never strand the loader
+
+  loadMountains();
+  loadFlowers();
+
   new GLTFLoader().load('/assets/nature/nature_kit.glb', gltf => {
     const kit = gltf.scene;
     kit.traverse(o => { if (o.isMesh) { o.castShadow = useShadows; o.receiveShadow = false; } });
@@ -618,18 +723,110 @@ export function createGarden(canvas, opts = {}) {
     }
     buildRope();
     afterKit();
-  }, undefined, () => { buildRope(); afterKit(); });
+    assetDone();
+  }, undefined, () => { buildRope(); afterKit(); assetDone(); });
 
   function afterKit() {
     // scatter the couple's grass meshes with the ported shader
     const loader = new GLTFLoader();
     const counts = isMobile ? [620, 380] : [1500, 900];
-    let pending = 2;
-    const done = () => { if (--pending === 0) beginIntro(); };
-    loader.load('/assets/grass/grass.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.6), counts[0], 11, 0.6); done(); },
-      undefined, () => { scatterGrass(fallbackBlade(0.6), counts[0], 11, 0.6); done(); });
-    loader.load('/assets/grass/grass2.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.48), counts[1], 23, 0.48); done(); },
-      undefined, () => { scatterGrass(fallbackBlade(0.48), counts[1], 23, 0.48); done(); });
+    loader.load('/assets/grass/grass.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.6), counts[0], 11, 0.6); assetDone(); },
+      undefined, () => { scatterGrass(fallbackBlade(0.6), counts[0], 11, 0.6); assetDone(); });
+    loader.load('/assets/grass/grass2.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.48), counts[1], 23, 0.48); assetDone(); },
+      undefined, () => { scatterGrass(fallbackBlade(0.48), counts[1], 23, 0.48); assetDone(); });
+  }
+
+  /* ------------- her mountains ------------- */
+  function loadMountains() {
+    new GLTFLoader().load('/assets/mountains/mountains_kit.glb', gltf => {
+      const kit = gltf.scene;
+      kit.traverse(o => {
+        if (o.isMesh && o.material) {
+          o.material = o.material.clone();
+          o.material.color = new THREE.Color(0xd4d9ef);   // moonlit snow tint
+          o.material.roughness = 1;
+        }
+      });
+      const grab = n => { const src = kit.getObjectByName(n); return src ? src.clone(true) : null; };
+      // [model, azimuth°, distance, height, sink]  — a horseshoe of peaks with a gap for the moon (~210°)
+      const ring = [
+        ['Mountain_winter_003', 118, 372, 235, 6],
+        ['Mountain_winter_007', 141, 340, 198, 5],
+        ['Mountain_winter_001', 163, 402, 262, 8],
+        ['Mountain_winter_009', 183, 356, 214, 6],
+        ['Mountain_winter_005', 236, 388, 246, 7],
+        ['Mountain_winter_002', 258, 344, 188, 5],
+        ['Mountain_winter_010', 281, 398, 226, 7],
+        ['Mountain_winter_004', 305, 352, 172, 5],
+        ['Mountain_winter_006',  22, 420, 150, 6],
+        ['Mountain_winter_008',  58, 430, 168, 6],
+        ['Plateau_winter_001',  205, 442, 120, 10],
+      ];
+      for (const [name, az, dist, h, sink] of ring) {
+        const o = grab(name);
+        if (!o) continue;
+        const a = az * Math.PI / 180;
+        o.position.set(Math.sin(a) * dist, SEA_Y - sink, Math.cos(a) * dist);
+        o.scale.setScalar(h);
+        o.rotation.y = a + Math.PI + (hash2(az, dist) - 0.5) * 0.7;
+        scene.add(o);
+      }
+      // two snowy islets closer in, rising straight out of the sea
+      for (const [name, az, dist, h, sink] of [
+        ['Hill_winter_001', 152, 148, 26, 3.5],
+        ['Hill_winter_002', 296, 128, 21, 3.0],
+      ]) {
+        const o = grab(name);
+        if (!o) continue;
+        const a = az * Math.PI / 180;
+        o.position.set(Math.sin(a) * dist, SEA_Y - sink, Math.cos(a) * dist);
+        o.scale.setScalar(h);
+        o.rotation.y = hash2(az, 7) * Math.PI * 2;
+        scene.add(o);
+      }
+      assetDone();
+    }, undefined, () => assetDone());
+  }
+
+  /* ------------- her flowers ------------- */
+  function loadFlowers() {
+    new GLTFLoader().load('/assets/flowers/flowers_kit.glb', gltf => {
+      const kit = gltf.scene;
+      kit.traverse(o => { if (o.isMesh) { o.castShadow = useShadows; } });
+      const grab = n => { const src = kit.getObjectByName(n); return src ? src.clone(true) : null; };
+      const put = (name, x, z, sc, ry, tilt = 0) => {
+        const o = grab(name);
+        if (!o) return null;
+        o.position.set(x, 0, z);
+        o.scale.setScalar(sc);
+        o.rotation.set(0, ry, tilt);
+        o.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(o);
+        o.position.y = terrainY(x, z) - bb.min.y - 0.01;
+        scene.add(o);
+        addKeepOut(x, z, 0.55 * sc + 0.25);
+        return o;
+      };
+      put('FlowerArr_5',  0.9, 12.9, 0.52, 0.6);        // spilling by the sign
+      put('FlowerArr_1', -6.3,  6.9, 0.50, 2.1);        // beside the reading stump
+      put('FlowerArr_2', -9.8,  5.6, 0.46, 4.0);        // under the lantern
+      put('FlowerArr_7',  9.4,  5.1, 0.46, 1.2);        // a safe step from the fire
+      put('FlowerArr_4',  3.5, -9.2, 0.50, 5.3);        // at the first birch
+      put('FlowerArr_9', 12.6,  9.9, 0.60, 2.8);        // shoreline spill
+      put('Dahlia_Stem', 11.8,  1.4, 0.55, 0.9);
+      put('Carnation_Stem', -3.9, 12.4, 0.50, 2.4);
+      put('Rose_Stem_C', -11.6, 8.9, 0.55, 1.7);
+      put('Rose_Stem_A',  3.05, 13.25, 0.5, 0.4, 0.28); // leaning on the sign leg
+      // a single rose left lying on the stump, beside the book 🥹
+      const laid = grab('Rose_Stem_B');
+      if (laid) {
+        laid.scale.setScalar(0.46);
+        laid.position.set(-7.28, terrainY(-7.6, 5.6) + 0.68, 6.05);
+        laid.rotation.set(0, 0.9, Math.PI / 2 - 0.12);
+        scene.add(laid);
+      }
+      assetDone();
+    }, undefined, () => assetDone());
   }
   function fallbackBlade(h) {
     const g = new THREE.ConeGeometry(0.05, h, 3);
@@ -797,6 +994,7 @@ export function createGarden(canvas, opts = {}) {
   let introStart = null, introDone = reduced, ready = false;
 
   function beginIntro() {
+    if (ready) return;
     ready = true;
     if (reduced) {
       controls.enabled = true;
@@ -810,14 +1008,14 @@ export function createGarden(canvas, opts = {}) {
     if (opts.onReady) opts.onReady();
   }
 
-  const camFrom = new V3(0, 26, 44), camTo = new V3(0.5, 8.2, 21.5);
+  const camFrom = new V3(0, 34, 86), camTo = new V3(0.5, 8.2, 21.5);
   const easeOut = t => 1 - Math.pow(1 - t, 3);
   const back = t => { const s = 1.7; t = Math.min(t, 1); return 1 + (s + 1) * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2); };
 
   const scaled = new THREE.Matrix4(), tmpM = new THREE.Matrix4();
   function updateIntro(now) {
     const t = now - introStart;
-    const ct = Math.min(t / 3.6, 1);
+    const ct = Math.min(t / 4.4, 1);
     camera.position.lerpVectors(camFrom, camTo, easeOut(ct));
     camera.lookAt(0, 1.7, 0);
 
@@ -874,6 +1072,7 @@ export function createGarden(canvas, opts = {}) {
     const now = performance.now() / 1000;
 
     for (const m of grassMats) if (m.userData.u) m.userData.u.uTime.value = now;
+    if (!reduced) seaUniforms.uTime.value = now;
 
     if (ready && !introDone && introStart != null) updateIntro(now);
     if (introDone) controls.update();
