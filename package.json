@@ -1,0 +1,22 @@
+{
+  "name": "our-little-garden",
+  "version": "1.0.0",
+  "description": "A living memory garden for Lina & Thiha",
+  "main": "server/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "pg": "^8.22.0"
+  }
+}

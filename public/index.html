@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Lina ♥ Thiha — our little garden</title>
+<meta name="description" content="A living garden of our days together. One rose blooms for every day." />
+<meta name="theme-color" content="#1b1430" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='24' font-size='24'%3E%F0%9F%8C%B9%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Caveat:wght@400;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/style.css" />
+<script type="importmap">
+{ "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/": "/vendor/addons/"
+} }
+</script>
+</head>
+<body>
+
+<!-- ==================== the garden itself ==================== -->
+<canvas id="scene" aria-label="A twilight garden. One rose grows for every day Lina and Thiha have been together."></canvas>
+<div id="scene-label" class="scene-label" hidden></div>
+
+<!-- ==================== gate ==================== -->
+<section id="gate" class="gate" aria-modal="true" role="dialog" aria-labelledby="gate-title">
+  <div class="gate-card">
+    <p class="gate-eyebrow">a garden kept by two</p>
+    <h1 id="gate-title" class="gate-names">Lina <span class="amp">&amp;</span> Thiha</h1>
+    <p class="gate-day">Day <span id="gate-daynum">—</span> <span class="gate-since">since 13 april 2024</span></p>
+
+    <div class="gate-step" id="gate-step-who">
+      <p class="gate-q">who's walking in tonight?</p>
+      <div class="profile-row">
+        <button class="profile-card" data-profile="Lina" type="button">
+          <svg viewBox="0 0 96 96" aria-hidden="true">
+            <circle cx="48" cy="48" r="46" fill="#f3ccd3"/>
+            <path d="M18 58c0-24 12-38 30-38s30 14 30 38c0 6-4 8-6 4 2-18-8-30-24-30S22 44 24 62c-2 4-6 2-6-4z" fill="#4a3548"/>
+            <circle cx="48" cy="52" r="22" fill="#f7dcc8"/>
+            <path d="M26 56c-2-20 8-32 22-32s24 12 22 32c-1-14-9-24-22-24s-21 10-22 24z" fill="#4a3548"/>
+            <circle cx="40" cy="52" r="2.6" fill="#3a2b38"/><circle cx="56" cy="52" r="2.6" fill="#3a2b38"/>
+            <path d="M43 61q5 4 10 0" stroke="#c4666f" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+            <circle cx="33" cy="59" r="3.4" fill="#eda3ac" opacity=".7"/><circle cx="63" cy="59" r="3.4" fill="#eda3ac" opacity=".7"/>
+            <g transform="translate(66 30)"><circle r="5" fill="#d96a7b"/><circle r="2" fill="#f6ead8"/>
+              <circle cx="-4.4" cy="-2.8" r="3" fill="#e58a99"/><circle cx="4.6" cy="-2.6" r="3" fill="#e58a99"/><circle cx="0" cy="5" r="3" fill="#e58a99"/></g>
+          </svg>
+          <span class="profile-name">Lina</span>
+          <span class="profile-word">the rose 🌸</span>
+        </button>
+        <button class="profile-card" data-profile="Thiha" type="button">
+          <svg viewBox="0 0 96 96" aria-hidden="true">
+            <circle cx="48" cy="48" r="46" fill="#ccd3f0"/>
+            <circle cx="48" cy="52" r="22" fill="#f0d0b5"/>
+            <path d="M27 50c-1-14 8-24 21-24s22 10 21 24c-3-10-7-14-9-13 2 4 1 6-1 5-4-3-7-4-11-4s-9 1-13 5c-2 1-3-1-2-5-3 1-5 5-6 12z" fill="#2e2438"/>
+            <circle cx="40" cy="53" r="2.6" fill="#2e2438"/><circle cx="56" cy="53" r="2.6" fill="#2e2438"/>
+            <path d="M43 62q5 3.6 10 0" stroke="#a86b52" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+            <path d="M74 26a9 9 0 1 1-8-12 7 7 0 1 0 8 12z" fill="#e8d79a"/>
+          </svg>
+          <span class="profile-name">Thiha</span>
+          <span class="profile-word">the moon 🌙</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="gate-step" id="gate-step-key" hidden>
+      <p class="gate-q">hello, <span id="gate-hello">love</span>. the gate is locked with the secret only we know.</p>
+      <form id="gate-form" class="gate-form" autocomplete="off">
+        <input id="gate-pass" type="password" inputmode="numeric" placeholder="•••••" aria-label="the secret" maxlength="24" />
+        <button type="submit" class="btn btn-rose">open the gate</button>
+      </form>
+      <p id="gate-error" class="gate-error" role="alert" hidden></p>
+      <button id="gate-visit" class="btn-ghostly" type="button">just here to look around →</button>
+      <button id="gate-back" class="btn-ghostly small" type="button">← that's not me</button>
+    </div>
+  </div>
+  <p class="gate-foot">one rose blooms for every day · photographs on the line · pages in a book · a small fire, for letting go</p>
+</section>
+
+<!-- ==================== HUD ==================== -->
+<header id="hud" class="hud" hidden>
+  <div class="hud-left">
+    <p class="hud-names">Lina <span class="amp">&amp;</span> Thiha</p>
+    <p class="hud-day">Day <span id="hud-daynum">—</span></p>
+    <p class="hud-next">next rose in <span id="hud-countdown">—</span></p>
+  </div>
+  <div class="hud-right">
+    <div id="hud-presence" class="hud-presence" aria-live="polite"></div>
+    <button id="hud-sound" class="hud-chip" type="button" aria-pressed="false" title="Play the garden's sound">🔇 sound</button>
+    <button id="hud-lock" class="hud-chip" type="button" title="Switch person or lock the gate">👤 <span id="hud-me">—</span></button>
+  </div>
+</header>
+
+<div id="ghost-note" class="ghost-note" hidden>
+  the garden seats two, and both chairs are taken — you're drifting through as a ghost 👻 (looking only)
+</div>
+
+<!-- ==================== dock ==================== -->
+<nav id="dock" class="dock" hidden aria-label="Places in the garden">
+  <button class="dock-tab" data-open="journal" type="button"><span class="dock-ic">📖</span>the book</button>
+  <button class="dock-tab" data-open="gallery" type="button"><span class="dock-ic">🖼️</span>the line</button>
+  <button class="dock-tab" data-open="burn" type="button"><span class="dock-ic">🕯️</span>the fire</button>
+</nav>
+
+<!-- ==================== journal ==================== -->
+<section id="journal" class="overlay" hidden aria-modal="true" role="dialog" aria-label="Our book">
+  <button class="overlay-close" data-close type="button" aria-label="Close the book">✕</button>
+  <div class="book">
+    <div class="book-page book-left" id="book-left"></div>
+    <div class="book-spine"></div>
+    <div class="book-page book-right" id="book-right"></div>
+  </div>
+  <div class="book-nav">
+    <button id="book-prev" class="btn-page" type="button" aria-label="Earlier pages">← earlier</button>
+    <span id="book-where" class="book-where"></span>
+    <button id="book-next" class="btn-page" type="button" aria-label="Later pages">later →</button>
+    <button id="book-write" class="btn btn-rose" type="button" hidden>✒ write a page</button>
+  </div>
+</section>
+
+<!-- write-a-page -->
+<section id="writer" class="overlay" hidden aria-modal="true" role="dialog" aria-label="Write a page">
+  <button class="overlay-close" data-close type="button" aria-label="Close without saving">✕</button>
+  <form id="writer-form" class="paper writer">
+    <p class="writer-date" id="writer-date"></p>
+    <input id="writer-title" class="writer-title" maxlength="120" placeholder="a title, if it wants one" />
+    <div class="writer-moods" id="writer-moods" role="radiogroup" aria-label="Tonight's mood"></div>
+    <textarea id="writer-body" class="writer-body" rows="9" maxlength="20000"
+      placeholder="dear us —"></textarea>
+    <div class="writer-foot">
+      <span class="writer-sign">— <span id="writer-author"></span></span>
+      <button type="submit" class="btn btn-rose">press it into the book</button>
+    </div>
+    <p id="writer-error" class="gate-error" role="alert" hidden></p>
+  </form>
+</section>
+
+<!-- ==================== gallery ==================== -->
+<section id="gallery" class="overlay overlay-wide" hidden aria-modal="true" role="dialog" aria-label="Photographs on the line">
+  <button class="overlay-close" data-close type="button" aria-label="Leave the line">✕</button>
+  <header class="gallery-head">
+    <h2 class="overlay-title">photographs on the line</h2>
+    <button id="gallery-add" class="btn btn-rose" type="button" hidden>+ hang something new</button>
+  </header>
+  <div id="gallery-lines" class="gallery-lines" tabindex="0"></div>
+  <p id="gallery-empty" class="empty-note" hidden>no photographs on the line yet — hang the first one.</p>
+</section>
+
+<!-- upload -->
+<section id="uploader" class="overlay" hidden aria-modal="true" role="dialog" aria-label="Hang something new">
+  <button class="overlay-close" data-close type="button" aria-label="Cancel">✕</button>
+  <div class="paper uploader">
+    <h2 class="overlay-title dark">hang something new</h2>
+    <label id="drop" class="drop">
+      <input id="file-input" type="file" accept="image/*,video/*" multiple hidden />
+      <span id="drop-text">drop photos or videos here, or tap to choose<br/><small>photos are softened to travel light · videos up to 60&nbsp;MB</small></span>
+    </label>
+    <ul id="upload-list" class="upload-list"></ul>
+    <div class="uploader-fields">
+      <input id="upload-caption" maxlength="140" placeholder="a line to remember it by (optional)" />
+      <label class="upload-date-label">taken on <input id="upload-date" type="date" /></label>
+    </div>
+    <div class="writer-foot">
+      <span id="upload-status" class="upload-status"></span>
+      <button id="upload-go" class="btn btn-rose" type="button" disabled>hang it on the line</button>
+    </div>
+  </div>
+</section>
+
+<!-- viewer -->
+<section id="viewer" class="overlay overlay-dark" hidden aria-modal="true" role="dialog" aria-label="A memory, up close">
+  <button class="overlay-close" data-close type="button" aria-label="Step back">✕</button>
+  <button id="viewer-prev" class="viewer-arrow left" type="button" aria-label="Previous memory">‹</button>
+  <figure class="polaroid big" id="viewer-card">
+    <div class="polaroid-media" id="viewer-media"></div>
+    <figcaption class="polaroid-caption">
+      <span id="viewer-caption" class="hand"></span>
+      <span class="polaroid-meta"><span id="viewer-by"></span> · <span id="viewer-date"></span></span>
+    </figcaption>
+  </figure>
+  <button id="viewer-next" class="viewer-arrow right" type="button" aria-label="Next memory">›</button>
+  <div class="viewer-actions">
+    <button id="viewer-burn" class="btn btn-ember" type="button" hidden>🕯 give it to the fire</button>
+  </div>
+</section>
+
+<!-- ==================== burn: choose ==================== -->
+<section id="burnpick" class="overlay overlay-dark" hidden aria-modal="true" role="dialog" aria-label="The fire">
+  <button class="overlay-close" data-close type="button" aria-label="Step away from the fire">✕</button>
+  <h2 class="overlay-title light">the small fire</h2>
+  <p class="burn-lede">some things are heavy to keep. bring one to the fire and let the night hold it instead.<br/>
+  <strong>once it burns, it is gone from the book for good — only the date stays, kept in smoke.</strong></p>
+  <div class="burn-tabs">
+    <button class="burn-tab is-on" data-tab="photos" type="button">photographs</button>
+    <button class="burn-tab" data-tab="pages" type="button">pages</button>
+  </div>
+  <div id="burn-grid" class="burn-grid"></div>
+  <p id="burn-empty" class="empty-note light" hidden></p>
+</section>
+
+<!-- burn: ritual -->
+<section id="ritual" class="ritual" hidden aria-modal="true" role="dialog" aria-label="Burning">
+  <canvas id="ritual-canvas"></canvas>
+  <p id="ritual-hint" class="ritual-hint">press and hold the match to strike it</p>
+  <button id="ritual-match" class="match" type="button" aria-label="Strike the match">
+    <span class="match-stick"></span><span class="match-head"></span>
+  </button>
+  <button id="ritual-cancel" class="btn-ghostly light" type="button">step back, keep it</button>
+  <p id="ritual-done" class="ritual-done" hidden></p>
+</section>
+
+<!-- toasts -->
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<div id="loading" class="loading"><span class="loading-rose">🌹</span><span id="loading-text">planting the roses…</span></div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

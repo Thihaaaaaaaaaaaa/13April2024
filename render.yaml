@@ -1,0 +1,16 @@
+# Render Blueprint — deploy with "New +" → "Blueprint" and point it at this repo.
+services:
+  - type: web
+    name: our-little-garden
+    runtime: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # paste your Neon pooled connection string in the dashboard
+      - key: EDIT_PASSWORD
+        sync: false          # your shared secret (e.g. 13424)
+      - key: SESSION_SECRET
+        generateValue: true
