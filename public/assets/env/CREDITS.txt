@@ -1,0 +1,4 @@
+grass sprite atlas — from the couple's BinbunGrass pack (grass.gdshader wind &
+dither ideas ported to Three.js). cloud technique in the sky — ported from the
+couple's Godot sky shader (SourceCode.zip main.gdshader, double-sample
+parallax clouds).

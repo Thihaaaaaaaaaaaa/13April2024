@@ -4,7 +4,11 @@ A living memory garden for **Lina 🌸 & Thiha 🌙** — one rose blooms for ev
 day since **13 April 2024**.
 
 - **The garden** — a twilight island in a quiet sea, ringed by big snow-capped
-  mountains (she likes mountains). Roses grow in a spiral, one per day (day 1
+  mountains (she likes mountains). The island's shore is organic now — no more
+  perfect circle — with a sandy lip, wet-rock crag, and foam that follows every
+  curve. Clouds drift overhead (ported from your Godot sky shader), sprite
+  grass from your BinbunGrass pack sways between the blade meshes, and on
+  desktop the whole scene gets a soft bloom + film-grain finish. Roses grow in a spiral, one per day (day 1
   is the very heart). Milestone days bloom gold. Today's rose glows pink.
   Fireflies, drifting petals, wind in the grass — the grass uses your own
   stylized-grass meshes and a port of your Godot grass shader. Flower
@@ -119,6 +123,10 @@ The rose spiral scales itself: day 826 sits ~10 units from the heart, day 2000
   (`public/assets/mountains/LICENSE.txt`, craftpix.net file license)
 - **Flower arrangements** — by **Loafbrr** (loafbrr.itch.io) — see
   `public/assets/flowers/CREDITS.txt`; a donation to them is a lovely gesture
+- **Retro TV setup** — user-supplied "Retro_TV_Setup" pack (textures/model
+  as provided; see the pack's SuggestedTextureSetting.txt)
+- **Grass sprites & clouds** — from the couple's own BinbunGrass pack and
+  Godot sky shader, ported to Three.js (`public/assets/env/CREDITS.txt`)
 - **The sea** — written for this garden (your SeaWaterMaterial zip is
   password-protected, so the waves, foam and moon-glint are a custom shader in
   `public/js/garden.js`; send the password and it can be swapped for a port of

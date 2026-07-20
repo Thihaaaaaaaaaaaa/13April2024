@@ -20,7 +20,7 @@ const el = {
   gateVisit: $('#gate-visit'), gateBack: $('#gate-back'),
   hud: $('#hud'), hudDay: $('#hud-daynum'), hudCountdown: $('#hud-countdown'),
   hudPresence: $('#hud-presence'), hudSound: $('#hud-sound'), hudLock: $('#hud-lock'), hudMe: $('#hud-me'),
-  ghostNote: $('#ghost-note'), dock: $('#dock'),
+  ghostNote: $('#ghost-note'),
   journal: $('#journal'), bookLeft: $('#book-left'), bookRight: $('#book-right'),
   bookPrev: $('#book-prev'), bookNext: $('#book-next'), bookWhere: $('#book-where'), bookWrite: $('#book-write'),
   bookEl: $('.book'),
@@ -35,6 +35,9 @@ const el = {
   burnpick: $('#burnpick'), burnGrid: $('#burn-grid'), burnEmpty: $('#burn-empty'),
   ritual: $('#ritual'), ritualCanvas: $('#ritual-canvas'), ritualMatch: $('#ritual-match'),
   ritualHint: $('#ritual-hint'), ritualCancel: $('#ritual-cancel'), ritualDone: $('#ritual-done'),
+  tvguide: $('#tvguide'), tvList: $('#tv-list'), tvEmpty: $('#tv-empty'), tvAdd: $('#tv-add'),
+  tvControls: $('#tv-controls'), tvcTitle: $('#tvc-title'), tvcPause: $('#tvc-pause'),
+  tvcNext: $('#tvc-next'), tvcStop: $('#tvc-stop'),
   toasts: $('#toasts'), loading: $('#loading'), loadingText: $('#loading-text'),
   sceneLabel: $('#scene-label'),
 };
@@ -114,7 +117,6 @@ function closeGate(welcome) {
   el.gate.classList.add('leaving');
   setTimeout(() => { el.gate.hidden = true; }, 850);
   el.hud.hidden = false;
-  el.dock.hidden = false;
   el.hudMe.textContent = session.profile ? `${CONFIG.profiles[session.profile]?.emoji || ''} ${session.profile}` : 'someone';
   startHeartbeat();
   updateEditingUI();
@@ -197,7 +199,7 @@ function updateEditingUI() {
 }
 
 /* ---------------- overlays ---------------- */
-const areas = { journal: el.journal, gallery: el.gallery, burn: el.burnpick };
+const areas = { journal: el.journal, gallery: el.gallery, burn: el.burnpick, tv: el.tvguide };
 function anyOverlayOpen() {
   return $$('.overlay').some(o => !o.hidden) || !el.ritual.hidden;
 }
@@ -210,13 +212,17 @@ function openArea(name) {
   if (name === 'journal') { renderBook(); el.journal.hidden = false; }
   if (name === 'gallery') { renderGallery(); el.gallery.hidden = false; }
   if (name === 'burn') { renderBurnGrid(); el.burnpick.hidden = false; }
+  if (name === 'tv') {
+    if (garden.tv.state() === 'play') { onTvToggle(); return; }   // tapping the set = pause/resume
+    renderTVGuide(); el.tvguide.hidden = false;
+  }
 }
-$$('.dock-tab').forEach(b => b.addEventListener('click', () => openArea(b.dataset.open)));
 $$('[data-close]').forEach(b => b.addEventListener('click', () => {
   b.closest('.overlay').hidden = true;
 }));
 addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (garden.tv.state() === 'play') { garden.tv.stop(); el.tvControls.hidden = true; return; }
     const open = $$('.overlay').filter(o => !o.hidden);
     if (open.length) open[open.length - 1].hidden = true;
   }
@@ -254,8 +260,8 @@ function openingSheetHTML() {
     <p class="page-date">since ${fmtDate(startMidnight())} — day ${d} of us</p>
     <p class="page-body">one rose in the garden for every day we've had. this book keeps the rest: the pictures on the line, the pages we write, and the things we chose to let the fire hold.</p>
     <ul class="mile-list">
-      ${past.map(([day, label]) => `<li><span class="gold">✦ ${label}</span><span>${dateOf(day)}</span></li>`).join('')}
-      ${next.map(([day, label]) => `<li class="soon"><span>◦ ${label}</span><span>${dateOf(day)} · in ${day - d} days</span></li>`).join('')}
+      ${past.map(([day, m]) => `<li><span class="gold">${m.kind === 'anniv' ? '🌹' : '✦'} ${m.label}</span><span>${dateOf(day)}</span></li>`).join('')}
+      ${next.map(([day, m]) => `<li class="soon"><span>${m.kind === 'anniv' ? '🥀' : '◦'} ${m.label}</span><span>${dateOf(day)} · in ${day - d} days</span></li>`).join('')}
     </ul>
     ${smoke.length ? `<p class="page-kicker" style="margin-top:18px">kept in smoke</p>
       <ul class="smoke-list">${smoke.map(s => `<li>${escapeHtml(s.what)} — ${fmtDate(s.when)}</li>`).join('')}</ul>` : ''}
@@ -550,6 +556,56 @@ el.uploadGo.addEventListener('click', async () => {
     setTimeout(() => { el.uploader.hidden = true; el.gallery.hidden = false; }, 700);
   }
 });
+
+/* ==================================================================
+   the little cinema
+   ================================================================== */
+const tvTapes = () => memories.filter(m => m.kind === 'video' && !m.burned);
+let tapeIdx = -1;
+
+function renderTVGuide() {
+  const tapes = tvTapes();
+  el.tvEmpty.hidden = tapes.length > 0;
+  el.tvList.innerHTML = '';
+  tapes.forEach((m, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tape';
+    b.innerHTML = `
+      <span class="tape-media">${m.has_thumb ? `<img src="${mediaUrl(m.id, true)}" alt=""/>` : '🎞'}</span>
+      <span class="tape-label">${escapeHtml(m.caption || 'untitled tape')}
+        <span class="tape-meta">${m.uploaded_by} · ${fmtDate(m.taken_on || m.created_at)}</span></span>`;
+    b.addEventListener('click', () => playTape(i));
+    el.tvList.appendChild(b);
+  });
+}
+
+function playTape(i) {
+  const tapes = tvTapes();
+  if (!tapes.length) return;
+  tapeIdx = ((i % tapes.length) + tapes.length) % tapes.length;
+  const m = tapes[tapeIdx];
+  closeAllOverlays();
+  const ok = garden.tv.play(mediaUrl(m.id), () => {
+    el.tvControls.hidden = true;
+    toast('the tape ran out 📼');
+  });
+  if (!ok) { toast('the television is still warming up — one moment', true); return; }
+  el.tvcTitle.textContent = m.caption || 'untitled tape';
+  el.tvcPause.textContent = '⏸';
+  el.tvControls.hidden = false;
+}
+
+function onTvToggle() {
+  const st = garden.tv.toggle();
+  if (st === 'off') return;
+  el.tvcPause.textContent = st === 'paused' ? '▶' : '⏸';
+  el.tvControls.hidden = false;
+}
+el.tvcPause.addEventListener('click', onTvToggle);
+el.tvcStop.addEventListener('click', () => { garden.tv.stop(); el.tvControls.hidden = true; });
+el.tvcNext.addEventListener('click', () => playTape(tapeIdx + 1));
+el.tvAdd.addEventListener('click', () => { resetUploader(); el.tvguide.hidden = true; el.uploader.hidden = false; });
 
 /* ==================================================================
    the fire
