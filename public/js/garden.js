@@ -11,6 +11,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const V3 = THREE.Vector3;
 
@@ -26,8 +30,19 @@ function vnoise(x, z) { // smooth value noise
   const a = hash2(xi, zi), b = hash2(xi + 1, zi), c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
-function terrainY(x, z) {
-  return 0.32 * vnoise(x * 0.09 + 7.3, z * 0.09 - 2.1) + 0.14 * vnoise(x * 0.23, z * 0.23) - 0.2;
+const GROUND_Y = 6;                           // how high the garden sits above the sea
+function terrainY() {
+  return GROUND_Y;                            // the plateau top is the ground
+}
+// the island outline = the plateau's measured waterline (48 angular bins)
+const edgeTable = new Float32Array(48).fill(26);
+function edgeR(a) {
+  const t = (a / (Math.PI * 2) + 0.5) * 48;
+  const i0 = ((Math.floor(t) % 48) + 48) % 48, i1 = (i0 + 1) % 48, f = t - Math.floor(t);
+  return edgeTable[i0] * (1 - f) + edgeTable[i1] * f;
+}
+function insideIsland(x, z, pad = 0) {
+  return Math.hypot(x, z) < edgeR(Math.atan2(z, x)) - pad;
 }
 const mulberry = seed => () => {
   seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
@@ -90,63 +105,128 @@ export function createGarden(canvas, opts = {}) {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.16;
   const useShadows = !isMobile && !reduced;
   renderer.shadowMap.enabled = useShadows;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x241a3e, 60, 620);
+  let composer = null, bloomPass = null;
+  scene.fog = new THREE.Fog(0x241a3e, 95, 800);
 
   const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 1400);
   camera.position.set(0, 34, 86);
 
   const controls = new OrbitControls(camera, canvas);
-  controls.target.set(0, 1.7, 0);
+  controls.target.set(0, GROUND_Y + 1.7, 0);
   controls.enableDamping = true; controls.dampingFactor = 0.06;
   controls.enablePan = false;
-  controls.minDistance = 8; controls.maxDistance = 48;
-  controls.minPolarAngle = 0.4; controls.maxPolarAngle = 1.42;
+  controls.minDistance = 5; controls.maxDistance = 240;
+  controls.minPolarAngle = 0.02; controls.maxPolarAngle = 1.55;
   controls.autoRotate = !reduced; controls.autoRotateSpeed = 0.22;
   controls.enabled = false;
 
   /* ------------- lights ------------- */
-  scene.add(new THREE.HemisphereLight(0x6b5aa0, 0x2a1f38, 0.6));
+  if (!isMobile && !reduced) {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.55, 0.85);
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+  }
+
+  scene.add(new THREE.HemisphereLight(0x7b68ae, 0x33283f, 0.82));
+  scene.add(new THREE.AmbientLight(0x4a4066, 0.5));
+  const rim = new THREE.DirectionalLight(0xe0906c, 0.5);   // soft glow behind the objects
+  rim.position.set(-60, 42, -110);
+  scene.add(rim);
   const moonLight = new THREE.DirectionalLight(0xbfc8ff, 0.75);
   moonLight.position.set(-26, 34, -18);
   if (useShadows) {
     moonLight.castShadow = true;
-    moonLight.shadow.mapSize.set(1024, 1024);
+    moonLight.shadow.mapSize.set(2048, 2048);
     const sc = moonLight.shadow.camera;
     sc.left = -22; sc.right = 22; sc.top = 22; sc.bottom = -22; sc.far = 90;
     sc.updateProjectionMatrix();
-    moonLight.shadow.bias = -0.0015;
+    moonLight.shadow.bias = -0.0004;
+    moonLight.shadow.normalBias = 0.06;
+    sc.left = -42; sc.right = 42; sc.top = 42; sc.bottom = -42;
+    sc.near = 2; sc.far = 160;
+    sc.updateProjectionMatrix();
   }
   scene.add(moonLight);
 
   /* ------------- sky, moon, stars ------------- */
+  const skyUniforms = {
+    top: { value: new THREE.Color(0x161034) },
+    mid: { value: new THREE.Color(0x593a63) },
+    low: { value: new THREE.Color(0xc9756c) },
+    uCloudLit: { value: new THREE.Color(0xbfa6c9) },
+    uCloudShade: { value: new THREE.Color(0x5e4468) },
+    uSkyTime: { value: 0 },
+  };
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(760, 28, 20),
     new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
-      uniforms: {
-        top: { value: new THREE.Color(0x161034) },
-        mid: { value: new THREE.Color(0x593a63) },
-        low: { value: new THREE.Color(0xc9756c) },
-      },
+      uniforms: skyUniforms,
       vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `
-        uniform vec3 top, mid, low; varying vec3 vP;
+        uniform vec3 top, mid, low, uCloudLit, uCloudShade;
+        uniform float uSkyTime;
+        varying vec3 vP;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){
+          vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
+        }
+        float fbm(vec2 p){
+          return gn(p) * 0.55 + gn(p * 2.13 + 4.7) * 0.28 + gn(p * 4.31 + 9.1) * 0.17;
+        }
+        /* double-sample parallax clouds, as in the couple's sky shader */
+        float cloudHeight(vec2 uv, float density, float shapeExp){
+          float h = fbm(uv);
+          h = clamp((h - (1.0 - density)) / density, 0.0, 1.0);
+          return pow(h, shapeExp);
+        }
         void main(){
-          float h = normalize(vP).y;
+          vec3 dir = normalize(vP);
+          float h = dir.y;
           vec3 c = mix(low, mid, smoothstep(-0.05, 0.28, h));
           c = mix(c, top, smoothstep(0.22, 0.75, h));
           c += low * 0.16 * pow(1.0 - clamp(abs(h - 0.03) * 4.0, 0.0, 1.0), 2.0);
+
+          if (dir.y > 0.02) {
+            float t = 1.0 / dir.y;                       // hit the cloud plane at y=1
+            vec2 wind = vec2(1.0, 0.35) * uSkyTime * 0.006;
+            vec2 uv1 = dir.xz * t * 0.16 + wind;
+            vec2 uv2 = dir.xz * t * 0.23 + wind * 0.5 + 3.7;
+            float h1 = cloudHeight(uv1, 0.62, 2.0);
+            float h2 = cloudHeight(uv2, 0.62, 2.0);
+            uv1 += dir.xz * h1 * 0.05;                    // fake depth: re-sample pushed uv
+            uv2 += dir.xz * h2 * 0.05;
+            h1 = cloudHeight(uv1, 0.62, 2.0);
+            h2 = cloudHeight(uv2, 0.62, 2.0);
+            float cloud = min(h1, h1 * h2);
+            cloud *= smoothstep(0.02, 0.22, dir.y);
+            vec3 cloudCol = mix(uCloudShade, uCloudLit, clamp(h1 * 1.4 - 0.15, 0.0, 1.0));
+            cloudCol = mix(cloudCol, low, 0.25 * pow(1.0 - clamp(dir.y * 2.4, 0.0, 1.0), 2.0));
+            c = mix(c, cloudCol, pow(cloud, 0.8) * 0.85);
+          }
           gl_FragColor = vec4(c, 1.0);
         }`,
     })
   );
   scene.add(sky);
+  const skyProcMat = sky.material;
+  function setSky(url) {
+    if (!url) { sky.material = skyProcMat; return; }
+    new THREE.TextureLoader().load(url, t => {
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1;   // inside-of-sphere view
+      sky.material = new THREE.MeshBasicMaterial({ map: t, side: THREE.BackSide, fog: false, depthWrite: false });
+    }, undefined, () => {});                              // keeps the procedural twilight if absent
+  }
 
   {
     const n = 520, pos = new Float32Array(n * 3);
@@ -171,35 +251,115 @@ export function createGarden(canvas, opts = {}) {
   const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softCircleTex('rgba(253,244,218,.4)', 'rgba(253,244,218,0)'), fog: false, depthWrite: false, opacity: 0.5 }));
   moonHalo.scale.setScalar(102); moonHalo.position.copy(moon.position); scene.add(moonHalo);
 
-  /* ------------- the island ------------- */
+  /* ------------- the island: Plateau_winter_001 as the base ------------- */
   const R = 26;
-  {
-    const g = new THREE.CircleGeometry(R, 72, 0, Math.PI * 2);
-    g.rotateX(-Math.PI / 2);
-    const p = g.attributes.position;
-    const colors = new Float32Array(p.count * 3);
-    const base = new THREE.Color(0x36523a), dark = new THREE.Color(0x27402f), soil = new THREE.Color(0x4a3a30);
-    const tmp = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), z = p.getZ(i);
-      p.setY(i, terrainY(x, z));
-      const r = Math.hypot(x, z);
-      const n = vnoise(x * 0.35 + 3, z * 0.35);
-      tmp.copy(base).lerp(dark, 0.35 + 0.5 * n).lerp(soil, 1 - Math.min(1, r / 5.5)); // soil heart under the roses
-      tmp.lerp(dark, THREE.MathUtils.smoothstep(r, R - 4, R));
-      colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+  const edgeTexData = new Uint8Array(48 * 4);
+  const edgeTex = new THREE.DataTexture(edgeTexData, 48, 1);
+  edgeTex.wrapS = THREE.RepeatWrapping;
+  edgeTex.magFilter = edgeTex.minFilter = THREE.LinearFilter;
+  function pushEdgeTable() {
+    for (let i = 0; i < 48; i++) {
+      const b = Math.round(THREE.MathUtils.clamp(edgeTable[i] / 80, 0, 1) * 255);
+      edgeTexData[i * 4] = b; edgeTexData[i * 4 + 3] = 255;
     }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    g.computeVertexNormals();
-    const ground = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-    ground.receiveShadow = useShadows;
-    scene.add(ground);
+    edgeTex.needsUpdate = true;
+  }
+  pushEdgeTable();
 
-    const skirt = new THREE.Mesh(
-      new THREE.CylinderGeometry(R, R + 2.6, 5.6, 72, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x2e2420, roughness: 1 })
-    );
-    skirt.position.y = -2.8; scene.add(skirt);
+  function fallbackBase() {                    // never a floating garden, even if the model fails
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(22, 64),
+      new THREE.MeshStandardMaterial({ color: 0x3f5f3a, roughness: 1 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = GROUND_Y - 0.01;
+    disc.receiveShadow = useShadows;
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(22, 23.5, GROUND_Y + 7, 64, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x4a3b31, roughness: 1 }));
+    wall.position.y = (GROUND_Y - 7) / 2;
+    scene.add(disc, wall);
+    edgeTable.fill(22.6); pushEdgeTable();
+  }
+
+  function loadBase() {
+    new GLTFLoader().load('/assets/mountains/mountains_kit.glb', gltf => {
+      const src = gltf.scene.getObjectByName('Plateau_winter_001');
+      if (!src) { fallbackBase(); assetDone(); return; }
+      const base = src.clone(true);
+      base.traverse(o => {
+        if (o.isMesh && o.material) {
+          o.material = o.material.clone();
+          o.material.color = new THREE.Color(0xffffff);   // natural palette, untinted
+          o.material.roughness = 1;
+          o.receiveShadow = useShadows;
+        }
+      });
+      // measure the flat top at unit scale, then size it to hold the whole garden
+      base.updateMatrixWorld(true);
+      const v = new THREE.Vector3();
+      const collect = (cb) => base.traverse(o => {
+        if (!o.isMesh) return;
+        const pa = o.geometry.attributes.position;
+        for (let k = 0; k < pa.count; k++) { v.fromBufferAttribute(pa, k).applyMatrix4(o.matrixWorld); cb(v); }
+      });
+      let maxY = -1e9; collect(p => { if (p.y > maxY) maxY = p.y; });
+      const capBins = new Float32Array(24).fill(0);
+      collect(p => {
+        if (p.y > maxY - 0.04) {
+          const bi = ((Math.floor((Math.atan2(p.z, p.x) / (Math.PI * 2) + 0.5) * 24) % 24) + 24) % 24;
+          const r = Math.hypot(p.x, p.z);
+          if (r > capBins[bi]) capBins[bi] = r;
+        }
+      });
+      let rIn = 1e9; for (const r of capBins) if (r > 0.01 && r < rIn) rIn = r;
+      if (!isFinite(rIn) || rIn < 0.02) rIn = 0.35;
+      const S = THREE.MathUtils.clamp(20.5 / rIn, 20, 120);
+      base.scale.setScalar(S);
+      base.position.y = GROUND_Y - maxY * S + 0.02;   // flat top lands at GROUND_Y
+      base.updateMatrixWorld(true);
+      scene.add(base);
+      {   // a green lawn over the flat top, cut to the measured cap outline
+        const P = 48, inset = 0.3;
+        const rims = new Float32Array(P);
+        for (let i = 0; i < P; i++) {
+          const t = i / P * 24, i0 = Math.floor(t) % 24, i1 = (i0 + 1) % 24, f = t - Math.floor(t);
+          rims[i] = Math.max((capBins[i0] * (1 - f) + capBins[i1] * f) * S - inset, 2);
+        }
+        const lpos = [0, GROUND_Y + 0.015, 0], lcol = [];
+        const gA = new THREE.Color(0x4f7f40), gB = new THREE.Color(0x3c6533), soil = new THREE.Color(0x52413a);
+        const tmpc = new THREE.Color();
+        tmpc.copy(soil); lcol.push(tmpc.r, tmpc.g, tmpc.b);
+        for (let i = 0; i <= P; i++) {
+          const a = (i % P) / P * Math.PI * 2 - Math.PI;
+          const r = rims[i % P];
+          lpos.push(Math.cos(a) * r, GROUND_Y + 0.015, Math.sin(a) * r);
+          tmpc.copy(gA).lerp(gB, 0.3 + 0.5 * vnoise(Math.cos(a) * 3 + 5, Math.sin(a) * 3));
+          lcol.push(tmpc.r, tmpc.g, tmpc.b);
+        }
+        const idx = [];
+        for (let i = 1; i <= P; i++) idx.push(0, i + 1, i);
+        const lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.Float32BufferAttribute(lpos, 3));
+        lg.setAttribute('color', new THREE.Float32BufferAttribute(lcol, 3));
+        lg.setIndex(idx);
+        lg.computeVertexNormals();
+        const lawn = new THREE.Mesh(lg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+        lawn.receiveShadow = useShadows;
+        scene.add(lawn);
+      }
+      // measure the waterline so the sea foam hugs the real silhouette
+      const bins = new Float32Array(48).fill(0);
+      collect(p => {
+        if (Math.abs(p.y - SEA_Y) < 1.4) {
+          const bi = ((Math.floor((Math.atan2(p.z, p.x) / (Math.PI * 2) + 0.5) * 48) % 48) + 48) % 48;
+          const r = Math.hypot(p.x, p.z);
+          if (r > bins[bi]) bins[bi] = r;
+        }
+      });
+      let last = 0; for (const r of bins) if (r > last) last = r;
+      for (let i = 0; i < 48; i++) if (bins[i] < 1) bins[i] = (bins[(i + 47) % 48] || bins[(i + 1) % 48] || last || 24);
+      for (let i = 0; i < 48; i++) edgeTable[i] = THREE.MathUtils.clamp(
+        (bins[(i + 47) % 48] + bins[i] * 2 + bins[(i + 1) % 48]) / 4, 8, 78);
+      pushEdgeTable();
+      assetDone();
+    }, undefined, () => { fallbackBase(); assetDone(); });
   }
 
   /* ------------- the sea ------------- */
@@ -212,11 +372,11 @@ export function createGarden(canvas, opts = {}) {
     uFoam: { value: new THREE.Color(0xe9eff1) },
     uGlint: { value: new THREE.Color(0xffe2b8) },
     uMoonDir: { value: new V3(-180, 158, -318).normalize() },
-    uIslandR: { value: R },
     uFogColor: { value: scene.fog.color },
     uFogNear: { value: scene.fog.near },
     uFogFar: { value: scene.fog.far },
     uAmp: { value: reduced ? 0.06 : 0.22 },
+    uEdgeTex: { value: edgeTex },
   };
   {
     const seg = isMobile ? 120 : 176;
@@ -256,7 +416,7 @@ export function createGarden(canvas, opts = {}) {
           gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
         }`,
       fragmentShader: `
-        uniform float uTime, uIslandR, uFogNear, uFogFar;
+        uniform float uTime, uFogNear, uFogFar;
         uniform vec3 uDeep, uShallow, uHorizon, uFoam, uGlint, uMoonDir, uFogColor;
         varying vec3 vW; varying vec3 vN;
         float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -264,14 +424,19 @@ export function createGarden(canvas, opts = {}) {
           vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
           return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
         }
+        uniform sampler2D uEdgeTex;
+        float edgeR(float a){
+          return texture2D(uEdgeTex, vec2(a / 6.2831853 + 0.5, 0.5)).r * 80.0;
+        }
         void main(){
           vec3 N = normalize(vN);
           vec3 Vv = cameraPosition - vW;
           float viewDist = length(Vv);
           vec3 V = Vv / viewDist;
           float dC = length(vW.xz);
+          float eIsl = edgeR(atan(vW.z, vW.x));
 
-          float shore = smoothstep(uIslandR + 16.0, uIslandR - 2.0, dC);
+          float shore = smoothstep(eIsl + 16.0, eIsl - 2.0, dC);
           vec3 col = mix(uDeep, uShallow, shore * 0.85 + 0.08);
 
           float fres = pow(1.0 - clamp(dot(V, N), 0.0, 1.0), 3.0);
@@ -284,7 +449,7 @@ export function createGarden(canvas, opts = {}) {
           col += uGlint * (spec * 1.6 + sparkle);
 
           /* foam: a breathing ring where the sea meets the island, plus wave crests */
-          float ring = smoothstep(uIslandR + 3.0, uIslandR + 0.5, dC) * smoothstep(uIslandR - 1.5, uIslandR + 0.6, dC);
+          float ring = smoothstep(eIsl + 3.0, eIsl + 0.5, dC) * smoothstep(eIsl - 1.5, eIsl + 0.6, dC);
           float lap = 0.55 + 0.45 * sin(uTime * 1.4 + gn(vW.xz * 1.7) * 6.2831);
           float foamRing = ring * lap * (0.45 + 0.55 * gn(vW.xz * 2.6 + uTime * 0.32));
           float crest = smoothstep(0.14, 0.30, vW.y + 1.15) * (1.0 - smoothstep(60.0, 200.0, dC)) * 0.4
@@ -314,8 +479,8 @@ export function createGarden(canvas, opts = {}) {
       uTime: { value: 0 },
       uHeight: { value: height },
       uWind: { value: reduced ? 0.045 : 0.14 },
-      uRoot: { value: new THREE.Color(0x2c4630) },
-      uTip: { value: new THREE.Color(0x9dc06a) },
+      uRoot: { value: new THREE.Color(0x315233) },
+      uTip: { value: new THREE.Color(0xa6c973) },
       uNoiseScale: { value: 7.5 },
     };
     mat.onBeforeCompile = sh => {
@@ -371,6 +536,130 @@ export function createGarden(canvas, opts = {}) {
   }
 
   const introItems = []; // {mesh, idx, mat4(final), delay, tilt}
+
+  function makeFallbackAtlas() {
+    // guaranteed coverage: hand-drawn blade clumps, used until (unless) the real atlas arrives
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g2 = c.getContext('2d');
+    const rnd = mulberry(5);
+    for (let t = 0; t < 4; t++) {
+      const ox = (t % 2) * 128, oy = (t / 2 | 0) * 128;
+      for (let b = 0; b < 7; b++) {
+        const bx = ox + 20 + rnd() * 88, lean = (rnd() - 0.5) * 26;
+        const h = 70 + rnd() * 50, w = 5 + rnd() * 6;
+        const grd = g2.createLinearGradient(0, oy + 128, 0, oy + 128 - h);
+        grd.addColorStop(0, 'rgba(255,255,255,1)');
+        grd.addColorStop(1, 'rgba(255,255,255,0.25)');
+        g2.fillStyle = grd;
+        g2.beginPath();
+        g2.moveTo(bx - w / 2, oy + 128);
+        g2.quadraticCurveTo(bx - w / 2 + lean * 0.4, oy + 128 - h * 0.6, bx + lean, oy + 128 - h);
+        g2.quadraticCurveTo(bx + w / 2 + lean * 0.4, oy + 128 - h * 0.6, bx + w / 2, oy + 128);
+        g2.closePath(); g2.fill();
+      }
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function scatterCardGrass() {
+    const count = isMobile ? 850 : 2400;
+    const geo = new THREE.PlaneGeometry(1, 1);
+    geo.translate(0, 0.5, 0);
+    const tiles = new Float32Array(count), phases = new Float32Array(count);
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime: { value: 0 },
+        uAtlas: { value: makeFallbackAtlas() },      // covered from frame one
+        uWind: { value: reduced ? 0.02 : 0.1 },
+      },
+      vertexShader: `
+        uniform float uTime, uWind;
+        attribute float aTile, aPhase;
+        varying vec2 vUv; varying float vTile; varying vec2 vWXZ;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){
+          vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
+        }
+        void main(){
+          vUv = uv; vTile = aTile;
+          vec3 iw = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+          vWXZ = iw.xz;
+          float sx = length(instanceMatrix[0].xyz);
+          float sy = length(instanceMatrix[1].xyz);
+          /* their billboard=true, locked upright: face the camera around Y */
+          vec3 toCam = cameraPosition - iw;
+          vec3 fwd = normalize(vec3(toCam.x, 0.0, toCam.z) + vec3(0.0001, 0.0, 0.0));
+          vec3 right = vec3(fwd.z, 0.0, -fwd.x);
+          vec3 wp = iw + right * position.x * sx + vec3(0.0, 1.0, 0.0) * position.y * sy;
+          /* their wind: scrolling noise, tips move most */
+          float w = gn(iw.xz * 0.03 - uTime * 0.05 - vec2(aPhase));
+          wp.xz += (w - 0.5) * 2.0 * uWind * (uv.y * uv.y) * vec2(1.0, 0.65);
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+        }`,
+      fragmentShader: `
+        uniform sampler2D uAtlas;
+        varying vec2 vUv; varying float vTile; varying vec2 vWXZ;
+        float gh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gn(vec2 p){
+          vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+          return mix(mix(gh(i), gh(i+vec2(1,0)), u.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), u.x), u.y);
+        }
+        /* their palette_01: 3 stops, clamped ends */
+        vec3 palette(float t){
+          vec3 a = vec3(0.659, 0.792, 0.345);
+          vec3 b = vec3(0.459, 0.655, 0.263);
+          vec3 c = vec3(0.275, 0.510, 0.196);
+          vec3 col = mix(a, b, smoothstep(0.1667, 0.5, t));
+          return mix(col, c, smoothstep(0.5, 0.8333, t));
+        }
+        void main(){
+          float tile = mod(vTile, 4.0);
+          vec2 off = vec2(mod(tile, 2.0), floor(tile / 2.0)) * 0.5;
+          float a = texture2D(uAtlas, vUv * 0.5 + off).a;
+          float alpha = clamp((a - 0.1) / 0.8, 0.0, 1.0);   /* their 0.1–0.9 window */
+          if (alpha < 0.1) discard;
+          float noiseV = gn(vWXZ * 0.055 + 4.2) * 0.7 + gn(vWXZ * 0.16) * 0.3;
+          vec3 c = palette(noiseV) * (0.62 + 0.38 * vUv.y);  /* rooted shading */
+          gl_FragColor = vec4(c, 1.0);
+        }`,
+    });
+    new THREE.TextureLoader().load('/assets/env/grass_atlas.png',
+      t => { t.colorSpace = THREE.SRGBColorSpace; mat.uniforms.uAtlas.value = t; },
+      undefined,
+      () => {});                                     // fallback atlas simply stays
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.frustumCulled = false;
+    const rnd = mulberry(77);
+    let placed = 0, guard = 0;
+    while (placed < count && guard++ < count * 60) {
+      const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * (R * 1.24);
+      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      if (!insideIsland(x, z, 1.15)) continue;
+      if (rr < 12 && rnd() > 0.14) continue;         // the roses keep their heart
+      if (blocked(x, z, 0.4)) continue;
+      dummy.position.set(x, terrainY(x, z) - 0.02, z);
+      dummy.rotation.set(0, 0, 0);
+      const sw = 0.4 + rnd() * 0.35, sh = 0.38 + rnd() * 0.32;
+      dummy.scale.set(sw, sh, sw);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(placed, dummy.matrix);
+      tiles[placed] = (rnd() * 4) | 0;
+      phases[placed] = rnd() * 9;
+      introItems.push({ mesh, idx: placed, m: dummy.matrix.clone(), delay: (rr / R) * 1.5 + rnd() * 0.25 });
+      placed++;
+    }
+    mesh.count = placed;
+    geo.setAttribute('aTile', new THREE.InstancedBufferAttribute(tiles, 1));
+    geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
+    mesh.userData.mat = mat;
+    cardGrass = mesh;
+    scene.add(mesh);
+  }
+  let cardGrass = null;
   const dummy = new THREE.Object3D();
 
   function scatterGrass(geo, count, seed, height) {
@@ -380,8 +669,9 @@ export function createGarden(canvas, opts = {}) {
     const rnd = mulberry(seed);
     let placed = 0, guard = 0;
     while (placed < count && guard++ < count * 40) {
-      const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * (R - 1.6);
+      const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * (R * 1.24);
       const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      if (!insideIsland(x, z, 1.4)) continue;
       const inHeart = rr < 11 ? (rnd() > 0.12) : rr < 15 ? (rnd() > 0.55) : false; // let roses own the heart
       if (inHeart || blocked(x, z, 0.35)) continue;
       dummy.position.set(x, terrainY(x, z) - 0.02, z);
@@ -458,6 +748,60 @@ export function createGarden(canvas, opts = {}) {
 
   const goldGlowTex = softCircleTex('rgba(255,214,140,.9)', 'rgba(255,214,140,0)');
   const glowGroup = new THREE.Group(); scene.add(glowGroup);
+  const annivGroup = new THREE.Group(); scene.add(annivGroup);
+  let annivSpots = [];
+
+  function refreshAnniversaries() {
+    annivGroup.clear();
+    annivSpots.sort((a, b) => a.n - b.n);
+    annivSpots.forEach((spot, k) => {
+      const { x, z } = spot;
+      const y = terrainY(x, z);
+      const g = new THREE.Group();
+      g.position.set(x, y, z);
+      // plinth + gold ring
+      const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 0.1, 20),
+        new THREE.MeshStandardMaterial({ color: 0x6b5638, roughness: 0.6, metalness: 0.4 }));
+      plinth.position.y = 0.05;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 10, 28),
+        new THREE.MeshStandardMaterial({ color: 0xf2c257, roughness: 0.3, metalness: 0.9, emissive: 0x6b4a12, emissiveIntensity: 0.5 }));
+      ring.rotation.x = Math.PI / 2; ring.position.y = 0.1;
+      // the rose itself — taller, deeper red, softly lit from within
+      const roseMat = new THREE.MeshStandardMaterial({ color: 0xd9455e, roughness: 0.45, emissive: 0x5a1120, emissiveIntensity: 0.9 });
+      const head = new THREE.Mesh(headGeo, roseMat);
+      const stem = new THREE.Mesh(stemGeo, stemMat);
+      const rose = new THREE.Group();
+      rose.add(head, stem);
+      rose.scale.setScalar(1.45);
+      rose.position.y = 0.1;
+      // glass dome
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.42, 26, 20),
+        new THREE.MeshPhysicalMaterial({ color: 0xcfe4ff, transparent: true, opacity: 0.14, roughness: 0.05, metalness: 0, depthWrite: false }));
+      dome.scale.set(1, 1.5, 1);
+      dome.position.y = 0.32;
+      // drifting sparkles inside
+      const sn = 12, spos = new Float32Array(sn * 3), srnd = mulberry(spot.n);
+      for (let i = 0; i < sn; i++) {
+        spos[i * 3] = (srnd() - 0.5) * 0.5;
+        spos[i * 3 + 1] = 0.2 + srnd() * 0.9;
+        spos[i * 3 + 2] = (srnd() - 0.5) * 0.5;
+      }
+      const sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.BufferAttribute(spos, 3));
+      const sparks = new THREE.Points(sg, new THREE.PointsMaterial({
+        size: 4, sizeAttenuation: false, map: goldGlowTex, transparent: true,
+        depthWrite: false, blending: THREE.AdditiveBlending, color: 0xffd9a8, opacity: 0.9,
+      }));
+      g.add(plinth, ring, rose, dome, sparks);
+      if (k === annivSpots.length - 1) {                  // the newest anniversary carries a light
+        const l = new THREE.PointLight(0xffb9c6, 1.0, 4.5, 2);
+        l.position.y = 0.9;
+        g.add(l);
+      }
+      g.userData = { rose, sparks, ph: spot.n * 1.618 };
+      annivGroup.add(g);
+    });
+  }
 
   let dayCount = 0, milestones = new Map();
   const roseColor = new THREE.Color();
@@ -467,6 +811,7 @@ export function createGarden(canvas, opts = {}) {
     const prev = dayCount;
     dayCount = Math.min(days, ROSE_MAX);
     glowGroup.clear();
+    annivSpots = [];
     for (let n = 1; n <= dayCount; n++) {
       const { x, z } = rosePos(n);
       const y = terrainY(x, z);
@@ -478,7 +823,11 @@ export function createGarden(canvas, opts = {}) {
       roseHeads.setMatrixAt(n - 1, dummy.matrix);
       roseStems.setMatrixAt(n - 1, dummy.matrix);
 
-      if (milestones.has(n)) {
+      const mst = milestones.get(n);
+      if (mst && mst.kind === 'anniv') {
+        annivSpots.push({ x, z, n });
+        roseColor.setHex(0xd9455e);
+      } else if (mst) {
         roseColor.setHex(0xf2c257);
         const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: goldGlowTex, depthWrite: false, transparent: true, opacity: 0.85 }));
         glow.position.set(x, y + 0.78 * s, z); glow.scale.setScalar(0.9);
@@ -489,7 +838,10 @@ export function createGarden(canvas, opts = {}) {
       }
       roseHeads.setColorAt(n - 1, roseColor);
     }
+    for (const sp of annivSpots) setRoseScale(sp.n, 0.0001);   // the dome stands where the rose would
     if (!revealed) for (let n = 1; n <= dayCount; n++) setRoseScale(n, 0.0001);
+    refreshAnniversaries();
+    annivGroup.visible = revealed;
     roseHeads.count = roseStems.count = dayCount;
     roseHeads.instanceMatrix.needsUpdate = roseStems.instanceMatrix.needsUpdate = true;
     if (roseHeads.instanceColor) roseHeads.instanceColor.needsUpdate = true;
@@ -520,11 +872,14 @@ export function createGarden(canvas, opts = {}) {
   const bookGroup = new THREE.Group(); bookGroup.name = 'journal'; scene.add(bookGroup);
   const lineGroup = new THREE.Group(); lineGroup.name = 'gallery'; scene.add(lineGroup);
   const fireGroup = new THREE.Group(); fireGroup.name = 'burn'; scene.add(fireGroup);
+  const tvGroup = new THREE.Group(); tvGroup.name = 'tv'; scene.add(tvGroup);
   const hotspots = [
     { group: bookGroup, label: 'open our book', at: new V3(-7.6, 2.4, 5.6), base: new V3(-7.6, 0, 5.6), br: 1.5 },
     { group: lineGroup, label: 'the photographs', at: new V3(7.4, 4.6, -7.6), base: new V3(7.5, 0, -7.5), br: 2.2 },
     { group: fireGroup, label: 'the small fire — for letting go', at: new V3(7.8, 1.8, 6.4), base: new V3(7.8, 0, 6.4), br: 1.4 },
+    { group: tvGroup, label: 'the little cinema', at: new V3(-2.3, 2.3, -13.2), base: new V3(-2.3, 0, -13.2), br: 1.6 },
   ];
+  for (const h of hotspots) { h.at.y += GROUND_Y; h.base.y += GROUND_Y; }
   for (const h of hotspots) h.base.y = terrainY(h.base.x, h.base.z) + 0.06;
   const hoverRing = new THREE.Mesh(
     new THREE.RingGeometry(0.82, 1.0, 40),
@@ -681,12 +1036,19 @@ export function createGarden(canvas, opts = {}) {
   const photosAnchor = new THREE.Group(); lineGroup.add(photosAnchor);
   const photoCards = [];
 
-  let assetsPending = 5;      // nature kit, mountains, flowers, grass ×2
+  /* ============== quick settings ============== */
+  const LOAD = { base: true, mountains: true, flowers: true, tv: true, grass: false };  // ← flip to enable/disable
+  const SKY_TEXTURE_URL = '/assets/env/sky.jpg';  // ← drop any equirect image there, or call garden.setSky(url)
+  /* ============================================ */
+  setSky(SKY_TEXTURE_URL);                       // applies your sky if the file exists
+  let assetsPending = 5;      // base, nature kit, mountains, flowers, tv
   const assetDone = () => { if (--assetsPending <= 0) beginIntro(); };
   setTimeout(() => { if (!ready) beginIntro(); }, 12000);   // never strand the loader
 
-  loadMountains();
-  loadFlowers();
+  LOAD.base ? loadBase() : (fallbackBase(), assetDone());
+  LOAD.mountains ? loadMountains() : assetDone();
+  LOAD.flowers ? loadFlowers() : assetDone();
+  LOAD.tv ? loadTV() : assetDone();
 
   new GLTFLoader().load('/assets/nature/nature_kit.glb', gltf => {
     const kit = gltf.scene;
@@ -727,13 +1089,92 @@ export function createGarden(canvas, opts = {}) {
   }, undefined, () => { buildRope(); afterKit(); assetDone(); });
 
   function afterKit() {
-    // scatter the couple's grass meshes with the ported shader
-    const loader = new GLTFLoader();
-    const counts = isMobile ? [620, 380] : [1500, 900];
-    loader.load('/assets/grass/grass.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.6), counts[0], 11, 0.6); assetDone(); },
-      undefined, () => { scatterGrass(fallbackBlade(0.6), counts[0], 11, 0.6); assetDone(); });
-    loader.load('/assets/grass/grass2.glb', g => { scatterGrass(normalizeGrass(extractGeometry(g.scene), 0.48), counts[1], 23, 0.48); assetDone(); },
-      undefined, () => { scatterGrass(fallbackBlade(0.48), counts[1], 23, 0.48); assetDone(); });
+    if (LOAD.grass) scatterCardGrass();   // their BinbunGrass — with a built-in fallback atlas
+  }
+
+  /* ------------- the little cinema ------------- */
+  const TV = { state: 'off', mesh: null, mat: null, video: null, tex: null, light: null, onEnded: null };
+  const tvStatic = (() => {
+    const c = document.createElement('canvas'); c.width = 160; c.height = 120;
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return { c, g: c.getContext('2d'), t, last: 0 };
+  })();
+  function tvSetState(st) {
+    TV.state = st;
+    if (!TV.mat) return;
+    if (st === 'off') { TV.mat.map = null; TV.mat.color.setHex(0x0a0d13); }
+    else if (st === 'static') { TV.mat.map = tvStatic.t; TV.mat.color.setHex(0xffffff); }
+    else if (st === 'play') { TV.mat.map = TV.tex; TV.mat.color.setHex(0xffffff); }
+    TV.mat.needsUpdate = true;
+  }
+  function loadTV() {
+    new GLTFLoader().load('/assets/tv/retro_tv_setup.glb', gltf => {
+      const setup = gltf.scene;
+      setup.traverse(o => { if (o.isMesh) { o.castShadow = useShadows; } });
+      const x = -2.3, z = -13.2;
+      setup.scale.setScalar(1.5);
+      setup.rotation.y = Math.atan2(0 - x, 0 - z);
+      setup.position.set(x, 0, z);
+      setup.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(setup);
+      setup.position.y = terrainY(x, z) - bb.min.y - 0.01;
+      tvGroup.add(setup);
+      addKeepOut(x, z, 1.8);
+      const scr = setup.getObjectByName('TV_Screen');
+      if (scr) {
+        TV.mesh = scr;
+        TV.mat = new THREE.MeshBasicMaterial({ toneMapped: false, color: 0x0a0d13 });
+        scr.material = TV.mat;
+      }
+      TV.light = new THREE.PointLight(0x9fc4ff, 0, 7, 2);
+      const sb = new THREE.Box3().setFromObject(setup);
+      TV.light.position.set(x + Math.sin(setup.rotation.y) * 1.4, (sb.min.y + sb.max.y) * 0.62, z + Math.cos(setup.rotation.y) * 1.4);
+      tvGroup.add(TV.light);
+      // two log seats for the audience of two
+      const logMat = new THREE.MeshStandardMaterial({ color: 0x5a4433, roughness: 1 });
+      for (const [lx, lz, ry] of [[-1.0, -11.2, 0.5], [-3.6, -11.5, -0.4]]) {
+        const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.42, 9), logMat);
+        seat.position.set(lx, terrainY(lx, lz) + 0.21, lz);
+        seat.rotation.y = ry;
+        seat.castShadow = useShadows;
+        tvGroup.add(seat);
+        addKeepOut(lx, lz, 0.55);
+      }
+      assetDone();
+    }, undefined, () => assetDone());
+  }
+  function tvPlay(url, onEnded) {
+    if (!TV.mat) return false;
+    if (!TV.video) {
+      TV.video = document.createElement('video');
+      TV.video.playsInline = true;
+      TV.video.preload = 'auto';
+      TV.video.addEventListener('ended', () => {
+        tvSetState('static');
+        setTimeout(() => { if (TV.state === 'static') tvSetState('off'); }, 550);
+        if (TV.onEnded) TV.onEnded();
+      });
+      TV.tex = new THREE.VideoTexture(TV.video);
+      TV.tex.colorSpace = THREE.SRGBColorSpace;
+    }
+    TV.onEnded = onEnded || null;
+    tvSetState('static');
+    TV.video.src = url;
+    TV.video.currentTime = 0;
+    const pr = TV.video.play();
+    if (pr && pr.then) pr.then(() => tvSetState('play')).catch(() => tvSetState('off'));
+    else tvSetState('play');
+    return true;
+  }
+  function tvToggle() {
+    if (!TV.video || TV.state !== 'play') return 'off';
+    if (TV.video.paused) { TV.video.play(); return 'playing'; }
+    TV.video.pause(); return 'paused';
+  }
+  function tvStop() {
+    if (TV.video) { TV.video.pause(); TV.video.removeAttribute('src'); TV.video.load(); }
+    tvSetState('off');
   }
 
   /* ------------- her mountains ------------- */
@@ -906,7 +1347,7 @@ export function createGarden(canvas, opts = {}) {
     const pos = new Float32Array(n * 3), seed = [];
     const rnd = mulberry(5);
     for (let i = 0; i < n; i++) {
-      seed.push({ a: rnd() * Math.PI * 2, r: 6 + rnd() * 15, h: 0.5 + rnd() * 2.2, s: 0.3 + rnd() * 0.7, o: rnd() * 100 });
+      seed.push({ a: rnd() * Math.PI * 2, r: 6 + rnd() * 15, h: GROUND_Y + 0.5 + rnd() * 2.2, s: 0.3 + rnd() * 0.7, o: rnd() * 100 });
     }
     for (let i = 0; i < n; i++) {
       const s = seed[i];
@@ -931,7 +1372,7 @@ export function createGarden(canvas, opts = {}) {
     const seed = [];
     const rnd = mulberry(31);
     for (let i = 0; i < n; i++) {
-      seed.push({ x: (rnd() - 0.5) * 40, z: (rnd() - 0.5) * 40, y: rnd() * 9 + 1, vy: 0.25 + rnd() * 0.3, ph: rnd() * 9, s: 0.7 + rnd() * 0.8 });
+      seed.push({ x: (rnd() - 0.5) * 40, z: (rnd() - 0.5) * 40, y: GROUND_Y + rnd() * 9 + 1, vy: 0.25 + rnd() * 0.3, ph: rnd() * 9, s: 0.7 + rnd() * 0.8 });
     }
     mesh.userData.seed = seed;
     mesh.frustumCulled = false;
@@ -1008,7 +1449,7 @@ export function createGarden(canvas, opts = {}) {
     if (opts.onReady) opts.onReady();
   }
 
-  const camFrom = new V3(0, 34, 86), camTo = new V3(0.5, 8.2, 21.5);
+  const camFrom = new V3(0, GROUND_Y + 34, 86), camTo = new V3(0.5, GROUND_Y + 8.2, 21.5);
   const easeOut = t => 1 - Math.pow(1 - t, 3);
   const back = t => { const s = 1.7; t = Math.min(t, 1); return 1 + (s + 1) * Math.pow(t - 1, 3) + s * Math.pow(t - 1, 2); };
 
@@ -1036,7 +1477,8 @@ export function createGarden(canvas, opts = {}) {
     const per = Math.min(2.4 / Math.max(dayCount, 1), 0.02);
     for (let n = 1; n <= dayCount; n++) {
       const k = (t - 0.5 - (n - 1) * per) / 0.55;
-      if (k < 0) { setRoseScale(n, 0.0001); allDone = false; }
+      const isAnniv = milestones.get(n) && milestones.get(n).kind === 'anniv';
+      if (k < 0 || isAnniv) { setRoseScale(n, 0.0001); if (k < 0) allDone = false; }
       else if (k < 1) { setRoseScale(n, Math.max(back(k), 0.0001)); allDone = false; }
       else setRoseScale(n, 1);
     }
@@ -1045,6 +1487,7 @@ export function createGarden(canvas, opts = {}) {
     if (ct >= 1 && allDone) {
       introDone = true;
       revealed = true;
+      annivGroup.visible = true;
       controls.enabled = true;
       plantRoses(dayCount, milestones); // settle exact matrices
       bloomPulse = 1;
@@ -1073,6 +1516,8 @@ export function createGarden(canvas, opts = {}) {
 
     for (const m of grassMats) if (m.userData.u) m.userData.u.uTime.value = now;
     if (!reduced) seaUniforms.uTime.value = now;
+    if (!reduced) skyUniforms.uSkyTime.value = now;
+    if (cardGrass) cardGrass.userData.mat.uniforms.uTime.value = now;
 
     if (ready && !introDone && introStart != null) updateIntro(now);
     if (introDone) controls.update();
@@ -1095,7 +1540,8 @@ export function createGarden(canvas, opts = {}) {
       for (let i = 0; i < ps.length; i++) {
         const s = ps[i];
         s.y -= s.vy * dt;
-        if (s.y < 0.05) { s.y = 8 + hash2(i, now % 97) * 3; s.x = (hash2(i, s.y) - 0.5) * 40; s.z = (hash2(s.y, i) - 0.5) * 40; }
+        const floorY = insideIsland(s.x, s.z) ? GROUND_Y + 0.05 : SEA_Y + 0.05;
+        if (s.y < floorY) { s.y = GROUND_Y + 6 + hash2(i, now % 97) * 4; s.x = (hash2(i, s.y) - 0.5) * 40; s.z = (hash2(s.y, i) - 0.5) * 40; }
         dummy.position.set(s.x + Math.sin(now * 0.8 + s.ph) * 1.1, s.y, s.z + Math.cos(now * 0.6 + s.ph) * 0.8);
         dummy.rotation.set(now * 1.2 + s.ph, s.ph, now * 0.9);
         dummy.scale.setScalar(s.s);
@@ -1141,6 +1587,28 @@ export function createGarden(canvas, opts = {}) {
     if (bloomPulse > 0) bloomPulse = Math.max(0, bloomPulse - dt * 0.5);
     sparkles.rotation.y = now * 0.5;
     sparkles.material.opacity = 0.55 + Math.sin(now * 2.4) * 0.35;
+    if (TV.state === 'static' && now - tvStatic.last > 0.07) {
+      tvStatic.last = now;
+      const { g: sg2, c } = tvStatic;
+      const im = sg2.createImageData(c.width, c.height);
+      for (let i = 0; i < im.data.length; i += 4) {
+        const v = (Math.random() * 235) | 0;
+        im.data[i] = v; im.data[i + 1] = v; im.data[i + 2] = v; im.data[i + 3] = 255;
+      }
+      sg2.putImageData(im, 0, 0);
+      tvStatic.t.needsUpdate = true;
+    }
+    if (TV.light) {
+      const tgt = TV.state === 'play' ? 1.15 + vnoise(now * 7.2, 5.5) * 0.5
+                : TV.state === 'static' ? 0.5 + Math.random() * 0.35 : 0;
+      TV.light.intensity += (tgt - TV.light.intensity) * 0.2;
+    }
+    for (const g of annivGroup.children) {
+      const u = g.userData;
+      if (!reduced) u.rose.rotation.y = now * 0.35 + u.ph;
+      u.sparks.rotation.y = -now * 0.4;
+      u.sparks.material.opacity = 0.6 + Math.sin(now * 1.8 + u.ph) * 0.3;
+    }
 
     // hover ring + label tracking
     if (hovered) {
@@ -1156,7 +1624,7 @@ export function createGarden(canvas, opts = {}) {
       labelEl.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
     }
 
-    renderer.render(scene, camera);
+    if (composer) composer.render(); else renderer.render(scene, camera);
   }
   loop();
 
@@ -1165,9 +1633,12 @@ export function createGarden(canvas, opts = {}) {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight, false);
+    if (composer) composer.setSize(innerWidth, innerHeight);
   }
 
   return {
+    setSky,
+    tv: { play: tvPlay, toggle: tvToggle, stop: tvStop, state: () => TV.state },
     setPhotos,
     setDay(days, ms, animateNew = false) {
       plantRoses(days, ms, animateNew);

@@ -96,13 +96,6 @@
   the garden seats two, and both chairs are taken — you're drifting through as a ghost 👻 (looking only)
 </div>
 
-<!-- ==================== dock ==================== -->
-<nav id="dock" class="dock" hidden aria-label="Places in the garden">
-  <button class="dock-tab" data-open="journal" type="button"><span class="dock-ic">📖</span>the book</button>
-  <button class="dock-tab" data-open="gallery" type="button"><span class="dock-ic">🖼️</span>the line</button>
-  <button class="dock-tab" data-open="burn" type="button"><span class="dock-ic">🕯️</span>the fire</button>
-</nav>
-
 <!-- ==================== journal ==================== -->
 <section id="journal" class="overlay" hidden aria-modal="true" role="dialog" aria-label="Our book">
   <button class="overlay-close" data-close type="button" aria-label="Close the book">✕</button>
@@ -211,7 +204,27 @@
 </section>
 
 <!-- toasts -->
-<div id="toasts" class="toasts" aria-live="polite"></div>
+<section id="tvguide" class="overlay" hidden aria-label="the little cinema">
+    <button class="overlay-close" data-close aria-label="close">✕</button>
+    <div class="tv-wrap">
+      <h2 class="overlay-title">the little cinema</h2>
+      <p class="overlay-sub">pick a tape — it plays on the television in the garden.</p>
+      <div id="tv-list" class="tv-list"></div>
+      <p id="tv-empty" class="empty-note" hidden>no tapes on the shelf yet.</p>
+      <div class="tv-actions"><button id="tv-add" class="btn">add a video 📼</button></div>
+    </div>
+  </section>
+
+  <div id="tv-controls" class="tv-controls" hidden>
+    <span id="tvc-title" class="tvc-title"></span>
+    <button id="tvc-pause" class="tvc-btn" aria-label="pause">⏸</button>
+    <button id="tvc-next" class="tvc-btn" aria-label="next tape">⏭</button>
+    <button id="tvc-stop" class="tvc-btn" aria-label="stop">⏹</button>
+  </div>
+
+  <div class="filmic" aria-hidden="true"></div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <div id="loading" class="loading"><span class="loading-rose">🌹</span><span id="loading-text">planting the roses…</span></div>
 

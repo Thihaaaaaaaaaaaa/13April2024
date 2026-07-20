@@ -171,22 +171,7 @@ button { font: inherit; cursor: pointer; }
   max-width: 92vw; text-align: center;
 }
 
-/* ---------------- dock ---------------- */
-.dock {
-  position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%);
-  z-index: 20; display: flex; gap: 10px;
-}
-.dock-tab {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-width: 92px; padding: 9px 16px 8px;
-  background: var(--paper); background-image: var(--paper-noise);
-  border: 0; border-radius: 12px 12px 4px 4px;
-  font-family: var(--serif); font-size: 15px; font-weight: 600; color: var(--ink);
-  box-shadow: 0 -1px 0 rgba(46,36,56,.15) inset, 0 12px 26px rgba(0, 0, 0, .45);
-  transform: translateY(6px); transition: transform .18s ease;
-}
-.dock-tab:hover { transform: translateY(0) rotate(-.5deg); }
-.dock-ic { font-size: 19px; }
+
 
 /* ---------------- overlays ---------------- */
 .overlay {
@@ -467,3 +452,38 @@ button { font: inherit; cursor: pointer; }
 [hidden] { display: none !important; }
 .match, .btn, .dock-tab, .profile-card { -webkit-user-select: none; user-select: none; }
 .match { touch-action: none; -webkit-touch-callout: none; }
+
+/* ---------- the little cinema ---------- */
+.tv-wrap { max-width: 880px; margin: 0 auto; padding: 70px 18px 40px; }
+.tv-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; margin-top: 18px; }
+.tape { position: relative; border: 0; cursor: pointer; background: #241c33; border-radius: 8px; padding: 10px 10px 12px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(246,234,216,.08); text-align: left;
+  transition: transform .18s ease, box-shadow .18s ease; }
+.tape:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(0,0,0,.45), inset 0 0 0 1px rgba(242,194,87,.35); }
+.tape-media { aspect-ratio: 4 / 3; border-radius: 4px; overflow: hidden; background: #100c1d; display: grid; place-items: center; margin-bottom: 8px; }
+.tape-media img { width: 100%; height: 100%; object-fit: cover; }
+.tape-label { display: block; background: #f6ead8; color: #2e2438; border-radius: 3px; padding: 5px 8px;
+  font-family: "Caveat", cursive; font-size: 17px; line-height: 1.15; box-shadow: inset 0 0 0 1px rgba(46,36,56,.15); }
+.tape-meta { display: block; font-size: 11px; color: #ad4a5e; font-family: "Caveat", cursive; margin-top: 2px; }
+.tv-actions { margin-top: 22px; text-align: center; }
+
+.tv-controls { position: fixed; left: 50%; bottom: 86px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; z-index: 26;
+  background: rgba(20,14,36,.72); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(246,234,216,.14); border-radius: 999px; padding: 8px 12px 8px 18px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+.tvc-title { font-family: "Caveat", cursive; font-size: 17px; color: #f6ead8; max-width: 40vw;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tvc-btn { border: 0; cursor: pointer; width: 38px; height: 38px; border-radius: 50%;
+  background: rgba(246,234,216,.1); color: #f6ead8; font-size: 16px; transition: background .15s ease; }
+.tvc-btn:hover { background: rgba(242,194,87,.3); }
+
+/* ---------- filmic grade: vignette + fine grain ---------- */
+.filmic { position: fixed; inset: 0; pointer-events: none; z-index: 18; }
+.filmic::before { content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 42%, transparent 52%, rgba(8,5,18,.42) 100%); }
+.filmic::after { content: ""; position: absolute; inset: -50%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  opacity: .05; mix-blend-mode: overlay; animation: grain 1.1s steps(4) infinite; }
+@keyframes grain { 0%{transform:translate(0,0)} 25%{transform:translate(-4%,3%)} 50%{transform:translate(3%,-4%)} 75%{transform:translate(-2%,-2%)} 100%{transform:translate(0,0)} }
+@media (prefers-reduced-motion: reduce) { .filmic::after { animation: none; } }

@@ -32,17 +32,20 @@ export function msToNextDay(now = new Date()) {
 
 /* Milestones — day counts and yearly anniversaries. Gold roses. */
 export function milestoneSet(maxDay) {
-  const set = new Map(); // day -> label
-  for (const d of [100, 200, 300, 365, 500, 730, 1000, 1095, 1461, 1500, 2000])
-    if (d <= maxDay + 400) set.set(d, d === 365 ? '1 year' : d === 730 ? '2 years' : d === 1095 ? '3 years' : d === 1461 ? '4 years' : `day ${d}`);
-  // anniversaries beyond the fixed list
-  for (let yr = 1; yr <= 30; yr++) {
-    const s = startMidnight();
-    const a = new Date(s.getFullYear() + yr, s.getMonth(), s.getDate());
-    const d = Math.floor((a - s) / 86400000) + 1;
-    if (d <= maxDay + 400 && !set.has(d)) set.set(d, `${yr} year${yr > 1 ? 's' : ''}`);
+  // day -> { label, kind }  ·  kind: 'anniv' (a very special flower) | 'gold'
+  const ms = new Map();
+  const golds = [100, 200, 300, 500, 730, 1000, 1500, 2000, 2500, 3000];
+  for (const d of golds) if (d <= maxDay) ms.set(d, { label: `day ${d} of us`, kind: 'gold' });
+  const start = startMidnight();
+  const ord = n => n + (['th','st','nd','rd'][(n%100>>3^1&&n%10)||0] || 'th');
+  for (let y = 1; y <= 30; y++) {
+    const a = new Date(start);
+    a.setFullYear(a.getFullYear() + y);
+    const d = Math.round((a - start) / 86400000) + 1;
+    if (d > maxDay) break;
+    ms.set(d, { label: `our ${ord(y)} year`, kind: 'anniv' });
   }
-  return set;
+  return ms;
 }
 
 export function fmtDate(d) {
