@@ -1,0 +1,7 @@
+Particle sprites (spark, flare, glow) rebuilt from the Brackeys VFX Bundle's
+opaque+alpha texture pairs (particles/opague + particles/alpha), plus the
+star_explosion flipbook from its predrawn/ folder — free asset pack from
+Brackeys (brackeys.com).
+
+raindrop.png and leaf.png extracted from "VFX Pack" by Brady Games (Unity
+asset package) — see the pack's own Term Of Use.txt for the original license.

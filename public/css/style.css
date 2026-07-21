@@ -242,6 +242,7 @@ button { font: inherit; cursor: pointer; }
 .mile-list { list-style: none; margin: 10px 0 0; padding: 0; font-family: var(--hand); font-size: 19.5px; line-height: 30px; }
 .mile-list li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dotted rgba(46,36,56,.2); }
 .mile-list .gold { color: #a4771f; }
+.mile-list .lav { color: #8b5fb0; }
 .mile-list .soon { color: var(--ink-soft); font-style: italic; }
 .smoke-list { list-style: none; margin: 8px 0 0; padding: 0; font-family: var(--hand); font-size: 18px; color: #776a7d; }
 .smoke-list li::before { content: "· "; }
@@ -487,3 +488,67 @@ button { font: inherit; cursor: pointer; }
   opacity: .05; mix-blend-mode: overlay; animation: grain 1.1s steps(4) infinite; }
 @keyframes grain { 0%{transform:translate(0,0)} 25%{transform:translate(-4%,3%)} 50%{transform:translate(3%,-4%)} 75%{transform:translate(-2%,-2%)} 100%{transform:translate(0,0)} }
 @media (prefers-reduced-motion: reduce) { .filmic::after { animation: none; } }
+
+/* ---------- the calendar ---------- */
+.gallery-head-actions { display: flex; gap: 10px; align-items: center; }
+.gallery-head .btn:not(.btn-rose) {
+  background: rgba(246,234,216,.1); color: var(--paper, #f6ead8);
+  padding: 8px 16px 9px; font-size: 15px;
+}
+.gallery-head .btn:not(.btn-rose):hover { background: rgba(246,234,216,.18); }
+.cal-nav { display: flex; align-items: center; gap: 12px; }
+.cal-label { font-family: var(--serif); font-size: 19px; min-width: 160px; text-align: center; }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+  max-width: 620px; margin: 18px auto 0; padding: 0 18px;
+}
+.cal-dow { text-align: center; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; opacity: .55; padding-bottom: 4px; }
+.cal-cell {
+  aspect-ratio: 1; border: 0; border-radius: 10px; cursor: pointer;
+  background: rgba(246,234,216,.06); color: inherit; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-family: var(--serif); font-size: 15px; transition: background .15s ease, transform .12s ease;
+}
+.cal-cell:hover { background: rgba(246,234,216,.14); transform: translateY(-1px); }
+.cal-cell.empty { visibility: hidden; cursor: default; }
+.cal-cell.has-mem { background: rgba(217,106,123,.18); }
+.cal-cell.is-today { box-shadow: inset 0 0 0 2px var(--rose, #d96a7b); }
+.cal-cell .cal-icon { font-size: 13px; line-height: 1; }
+.cal-cell .cal-dot { position: absolute; bottom: 5px; font-size: 9px; opacity: .8; }
+.cal-day { max-width: 900px; margin: 26px auto 0; padding: 0 18px 30px; }
+.cal-day-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.cal-day-head h3 { font-family: var(--serif); font-size: 20px; font-weight: 600; margin: 0; }
+.cal-day-grid { min-height: 40px; }
+
+/* ---------- weather settings panel ---------- */
+.weather-panel {
+  position: fixed; top: 66px; right: 18px; z-index: 30;
+  background: rgba(20,14,36,.86); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(246,234,216,.16); border-radius: 14px; padding: 14px 16px 16px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.45); min-width: 200px;
+}
+.weather-panel-title { font-family: "Caveat", cursive; font-size: 16px; color: #f6ead8; margin: 0 0 10px; opacity: .85; }
+.weather-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.weather-opt {
+  border: 1px solid rgba(246,234,216,.14); background: rgba(246,234,216,.06); color: #f6ead8;
+  border-radius: 9px; padding: 9px 6px; font-size: 14px; cursor: pointer; transition: background .15s ease, border-color .15s ease;
+}
+.weather-opt:hover { background: rgba(246,234,216,.14); }
+.weather-opt.active { background: rgba(242,194,87,.28); border-color: rgba(242,194,87,.55); }
+
+/* ---------- bench: sitting together ---------- */
+#bench-controls { bottom: 86px; }
+.bench-countdown {
+  position: fixed; left: 50%; top: 34%; transform: translate(-50%, -50%);
+  z-index: 27; text-align: center; pointer-events: none;
+  text-shadow: 0 4px 24px rgba(0,0,0,.55), 0 0 40px rgba(242,194,87,.35);
+}
+.bench-countdown #bench-countdown-num {
+  display: block; font-family: "Playfair Display", serif; font-weight: 700;
+  font-size: clamp(64px, 14vw, 128px); color: #f6ead8; line-height: 1;
+  animation: countPulse .55s ease;
+}
+@keyframes countPulse { 0% { transform: scale(1.35); opacity: 0; } 60% { transform: scale(1); opacity: 1; } 100% { transform: scale(1); } }
+.bench-countdown-label {
+  display: block; margin-top: 6px; font-family: "Caveat", cursive; font-size: 22px; color: #f2c257;
+}

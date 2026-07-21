@@ -135,8 +135,8 @@ export function createGarden(canvas, opts = {}) {
     composer.addPass(new OutputPass());
   }
 
-  scene.add(new THREE.HemisphereLight(0x7b68ae, 0x33283f, 0.82));
-  scene.add(new THREE.AmbientLight(0x4a4066, 0.5));
+  const hemiLight = new THREE.HemisphereLight(0x7b68ae, 0x33283f, 0.82); scene.add(hemiLight);
+  const ambientLight = new THREE.AmbientLight(0x4a4066, 0.5); scene.add(ambientLight);
   const rim = new THREE.DirectionalLight(0xe0906c, 0.5);   // soft glow behind the objects
   rim.position.set(-60, 42, -110);
   scene.add(rim);
@@ -157,6 +157,7 @@ export function createGarden(canvas, opts = {}) {
   scene.add(moonLight);
 
   /* ------------- sky, moon, stars ------------- */
+  let starsMat = null;
   const skyUniforms = {
     top: { value: new THREE.Color(0x161034) },
     mid: { value: new THREE.Color(0x593a63) },
@@ -244,6 +245,7 @@ export function createGarden(canvas, opts = {}) {
       color: 0xfff6e0, map: softCircleTex(), depthWrite: false, fog: false,
     }));
     scene.add(stars);
+    starsMat = stars.material;
   }
 
   const moon = new THREE.Sprite(new THREE.SpriteMaterial({ map: softCircleTex('#fdf4da', 'rgba(253,244,218,0)'), fog: false, depthWrite: false }));
@@ -251,7 +253,299 @@ export function createGarden(canvas, opts = {}) {
   const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({ map: softCircleTex('rgba(253,244,218,.4)', 'rgba(253,244,218,0)'), fog: false, depthWrite: false, opacity: 0.5 }));
   moonHalo.scale.setScalar(102); moonHalo.position.copy(moon.position); scene.add(moonHalo);
 
-  /* ------------- the island: Plateau_winter_001 as the base ------------- */
+  /* ------------- night mode (for the fireworks) ------------- */
+  const DAY_FOG = new THREE.Color(0x241a3e), NIGHT_FOG = new THREE.Color(0x050410);
+  const DAY_SKY = { top: skyUniforms.top.value.clone(), mid: skyUniforms.mid.value.clone(), low: skyUniforms.low.value.clone() };
+  const NIGHT_SKY = { top: new THREE.Color(0x030308), mid: new THREE.Color(0x0a0818), low: new THREE.Color(0x160f1e) };
+  const DAY_L = { hemi: 0.82, amb: 0.5, rim: 0.5, moon: 0.75, stars: 0.85 };
+  const NIGHT_L = { hemi: 0.2, amb: 0.14, rim: 0.04, moon: 0.32, stars: 1.0 };
+  let nightTarget = 0, nightT = 0;
+  function setNight(active) { nightTarget = active ? 1 : 0; }
+  function tickNight(dt) {
+    if (nightT === nightTarget) return;
+    nightT += (nightTarget - nightT) * Math.min(1, dt * 1.1);
+    if (Math.abs(nightT - nightTarget) < 0.002) nightT = nightTarget;
+    scene.fog.color.copy(DAY_FOG).lerp(NIGHT_FOG, nightT);
+    skyUniforms.top.value.copy(DAY_SKY.top).lerp(NIGHT_SKY.top, nightT);
+    skyUniforms.mid.value.copy(DAY_SKY.mid).lerp(NIGHT_SKY.mid, nightT);
+    skyUniforms.low.value.copy(DAY_SKY.low).lerp(NIGHT_SKY.low, nightT);
+    if (sky.material.color) sky.material.color.setScalar(THREE.MathUtils.lerp(1, 0.1, nightT));  // custom-texture sky path
+    hemiLight.intensity = THREE.MathUtils.lerp(DAY_L.hemi, NIGHT_L.hemi, nightT);
+    ambientLight.intensity = THREE.MathUtils.lerp(DAY_L.amb, NIGHT_L.amb, nightT);
+    rim.intensity = THREE.MathUtils.lerp(DAY_L.rim, NIGHT_L.rim, nightT);
+    moonLight.intensity = THREE.MathUtils.lerp(DAY_L.moon, NIGHT_L.moon, nightT);
+    if (starsMat) starsMat.opacity = THREE.MathUtils.lerp(DAY_L.stars, NIGHT_L.stars, nightT);
+  }
+
+  /* ------------- fireworks ------------- */
+  function makeParticlePool(capacity, textureUrl) {
+    const pos = new Float32Array(capacity * 3);
+    const col = new Float32Array(capacity * 3);
+    const life = new Float32Array(capacity);     // 0 = dead, 1 = newborn
+    const size = new Float32Array(capacity);
+    const vel = new Float32Array(capacity * 3);
+    const maxLife = new Float32Array(capacity);
+    const drag = new Float32Array(capacity);
+    const grav = new Float32Array(capacity);
+    let cursor = 0;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aLife', new THREE.BufferAttribute(life, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { map: { value: null } },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
+        attribute vec3 color; attribute float aLife; attribute float aSize;
+        varying vec3 vColor; varying float vLife;
+        void main(){
+          vColor = color; vLife = aLife;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = aSize * (320.0 / max(-mv.z, 0.001));
+        }`,
+      fragmentShader: `
+        uniform sampler2D map;
+        varying vec3 vColor; varying float vLife;
+        void main(){
+          vec4 tex = texture2D(map, gl_PointCoord);
+          float a = tex.a * clamp(vLife * 1.4, 0.0, 1.0);
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(vColor * (0.55 + 0.45 * vLife), a);
+        }`,
+    });
+    new THREE.TextureLoader().load(textureUrl, t => { t.colorSpace = THREE.SRGBColorSpace; mat.uniforms.map.value = t; });
+    const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
+    scene.add(points);
+
+    function spawn(px, py, pz, vx, vy, vz, r, g, b, lifeSec, sz, dragV = 0.985, gravV = 9.2) {
+      const i = cursor; cursor = (cursor + 1) % capacity;
+      pos[i * 3] = px; pos[i * 3 + 1] = py; pos[i * 3 + 2] = pz;
+      vel[i * 3] = vx; vel[i * 3 + 1] = vy; vel[i * 3 + 2] = vz;
+      col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+      life[i] = 1; maxLife[i] = lifeSec; size[i] = sz; drag[i] = dragV; grav[i] = gravV;
+      return i;
+    }
+    function tick(dt) {
+      for (let i = 0; i < capacity; i++) {
+        if (life[i] <= 0) continue;
+        vel[i * 3 + 1] -= grav[i] * dt;
+        vel[i * 3] *= drag[i]; vel[i * 3 + 1] *= drag[i] + 0.01; vel[i * 3 + 2] *= drag[i];
+        pos[i * 3] += vel[i * 3] * dt;
+        pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+        life[i] -= dt / maxLife[i];
+        if (life[i] < 0) life[i] = 0;
+      }
+      geo.attributes.position.needsUpdate = true;
+      geo.attributes.aLife.needsUpdate = true;
+    }
+    return { spawn, tick, points };
+  }
+
+  const fwSparks = makeParticlePool(7000, '/assets/vfx/spark.png');    // trails + starburst radiance
+  const fwFlares = makeParticlePool(260, '/assets/vfx/flare.png');     // rocket heads + burst-core flash
+
+  // a small reusable pool of billboarded flipbook "boom" flashes for extra bursts
+  const fwFlashPool = [];
+  {
+    const flashTex = new THREE.TextureLoader().load('/assets/vfx/burst_flipbook.png', t => { t.colorSpace = THREE.SRGBColorSpace; });
+    for (let i = 0; i < 8; i++) {
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { map: { value: flashTex }, uFrame: { value: 0 }, uOpacity: { value: 0 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `
+          uniform sampler2D map; uniform float uFrame; uniform float uOpacity;
+          varying vec2 vUv;
+          void main(){
+            float col = mod(uFrame, 6.0);
+            float row = floor(uFrame / 6.0);
+            vec2 uv = vec2((col + vUv.x) / 6.0, 1.0 - (row + 1.0 - vUv.y) / 5.0);
+            vec4 tex = texture2D(map, uv);
+            gl_FragColor = vec4(tex.rgb, tex.a * uOpacity);
+          }`,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false; mesh.frustumCulled = false;
+      scene.add(mesh);
+      fwFlashPool.push({ mesh, mat, t: 0, active: false, dur: 0.6 });
+    }
+  }
+  function spawnFlash(x, y, z, scale) {
+    const f = fwFlashPool.find(f => !f.active) || fwFlashPool[0];
+    f.active = true; f.t = 0;
+    f.mesh.position.set(x, y, z);
+    f.mesh.scale.setScalar(scale);
+    f.mesh.visible = true;
+  }
+  function tickFlashes(dt) {
+    for (const f of fwFlashPool) {
+      if (!f.active) continue;
+      f.t += dt;
+      const k = f.t / f.dur;
+      if (k >= 1) { f.active = false; f.mesh.visible = false; continue; }
+      f.mat.uniforms.uFrame.value = Math.min(29, Math.floor(k * 30));
+      f.mat.uniforms.uOpacity.value = (1 - k) * 0.85;
+      f.mesh.quaternion.copy(camera.quaternion);
+    }
+  }
+
+  const FW_PALETTE = [
+    [0xff9ac4, 'pink'], [0xffd27a, 'gold'], [0xd8a6ff, 'violet'], [0xff8f6b, 'ember'],
+    [0xa6e4ff, 'sky'], [0xfff2c6, 'warm-white'], [0xff6f9c, 'rose'], [0x9dffc9, 'mint'],
+  ];
+  const rgbOf = hex => new THREE.Color(hex);
+
+  function burstFirework(x, y, z, hex, big) {
+    const c = rgbOf(hex);
+    fwFlares.spawn(x, y, z, 0, 0, 0, c.r * 1.3 + 0.3, c.g * 1.3 + 0.3, c.b * 1.3 + 0.3, big ? 0.55 : 0.4, big ? 46 : 30, 0.9, 1);
+    const n = (big ? 300 : 190) + ((Math.random() * 40) | 0);   // "amplified" — a couple hundred sparks per burst
+    const speed = big ? 26 : 19;
+    for (let i = 0; i < n; i++) {
+      const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2;
+      const s = Math.sqrt(1 - u * u);
+      const dx = s * Math.cos(th), dz = s * Math.sin(th), dy = u;
+      const sp = speed * (0.55 + Math.random() * 0.55);
+      const jr = 0.82 + Math.random() * 0.36;
+      fwSparks.spawn(x, y, z, dx * sp, dy * sp + 2.0, dz * sp,
+        c.r * jr, c.g * jr, c.b * jr, 1.3 + Math.random() * 1.1, 4.5 + Math.random() * 3.5, 0.965, 6.4);
+    }
+    if (big || Math.random() < 0.35) spawnFlash(x, y, z, big ? 34 : 22);
+  }
+
+  const fwRockets = [];
+  let fwActive = false, fwSpawnTimer = 0, fwShowTime = 0, fwShowDur = 0, fwEndPause = 0;
+
+  function launchRocket() {
+    const bigFinale = fwShowDur - fwShowTime < 3.5;
+    const a = Math.random() * Math.PI * 2;
+    const dist = 20 + Math.random() * 200;             // a very large base — sea, shoreline, and beyond
+    const x = Math.cos(a) * dist, z = Math.sin(a) * dist;
+    const groundY = insideIsland(x, z) ? terrainY(x, z) : SEA_Y;
+    const burstY = groundY + 55 + Math.random() * 95;
+    const [hex] = FW_PALETTE[(Math.random() * FW_PALETTE.length) | 0];
+    const vx = (Math.random() - 0.5) * 3, vz = (Math.random() - 0.5) * 3;
+    const vy = (burstY - groundY) / (1.15 + Math.random() * 0.3);
+    fwRockets.push({ x, y: groundY, z, vx, vy, vz, burstY, hex, big: bigFinale || Math.random() < 0.12, trailT: 0 });
+  }
+  function tickRockets(dt) {
+    for (let i = fwRockets.length - 1; i >= 0; i--) {
+      const r = fwRockets[i];
+      r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
+      r.vy -= 3.0 * dt;
+      r.trailT -= dt;
+      if (r.trailT <= 0) {
+        r.trailT = 0.02;
+        const c = rgbOf(r.hex);
+        fwSparks.spawn(r.x, r.y, r.z, (Math.random() - 0.5) * 0.6, -1.5, (Math.random() - 0.5) * 0.6,
+          0.9 + c.r * 0.1, 0.85 + c.g * 0.1, 0.75, 0.45, 3, 0.94, 3);
+      }
+      if (r.y >= r.burstY) {
+        burstFirework(r.x, r.y, r.z, r.hex, r.big);
+        fwRockets.splice(i, 1);
+      }
+    }
+  }
+  function tickFireworks(dt) {
+    if (!fwActive) return;
+    fwShowTime += dt;
+    if (fwShowTime < fwShowDur) {
+      fwSpawnTimer -= dt;
+      if (fwSpawnTimer <= 0) {
+        const finale = fwShowDur - fwShowTime < 3.5;
+        launchRocket();
+        if (finale && Math.random() < 0.6) launchRocket();
+        fwSpawnTimer = finale ? 0.06 + Math.random() * 0.08 : 0.14 + Math.random() * 0.22;
+      }
+    } else if (fwRockets.length === 0) {
+      fwEndPause -= dt;
+      if (fwEndPause <= 0) { fwActive = false; setNight(false); }
+    }
+    tickRockets(dt);
+  }
+  function tickFireworksAlways(dt) {   // spark/flare physics + flashes keep animating even after the launch phase ends
+    fwSparks.tick(dt); fwFlares.tick(dt); tickFlashes(dt);
+  }
+  function startFireworks(durationSec = 22) {
+    if (fwActive) return;
+    fwActive = true; fwShowTime = 0; fwShowDur = durationSec; fwSpawnTimer = 0; fwEndPause = 3;
+    setNight(true);
+  }
+  function stopFireworks() {
+    fwActive = false; fwRockets.length = 0; setNight(false);
+  }
+
+  /* ------------- weather (editor's choice) ------------- */
+  function makeWeatherLayer(textureUrl, count, opts) {
+    const { fallMin, fallMax, drift, size, spanR, topY, groundY, tumble } = opts;
+    const pos = new Float32Array(count * 3);
+    const vy = new Float32Array(count);
+    const phase = new Float32Array(count);
+    const rnd = mulberry(count + 91);
+    for (let i = 0; i < count; i++) {
+      const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * spanR;
+      pos[i * 3] = Math.cos(a) * r;
+      pos[i * 3 + 1] = groundY + rnd() * (topY - groundY);
+      pos[i * 3 + 2] = Math.sin(a) * r;
+      vy[i] = fallMin + rnd() * (fallMax - fallMin);
+      phase[i] = rnd() * Math.PI * 2;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    const mat = new THREE.PointsMaterial({
+      size, sizeAttenuation: true, transparent: true, depthWrite: false,
+      opacity: 0.85, map: null, blending: tumble ? THREE.NormalBlending : THREE.AdditiveBlending,
+    });
+    new THREE.TextureLoader().load(textureUrl, t => { t.colorSpace = THREE.SRGBColorSpace; mat.map = t; mat.needsUpdate = true; });
+    const points = new THREE.Points(geo, mat);
+    points.visible = false; points.frustumCulled = false;
+    scene.add(points);
+    function tick(dt, now) {
+      for (let i = 0; i < count; i++) {
+        pos[i * 3 + 1] -= vy[i] * dt;
+        pos[i * 3] += Math.sin(now * 0.6 + phase[i]) * drift * dt;
+        pos[i * 3 + 2] += Math.cos(now * 0.5 + phase[i]) * drift * dt;
+        if (pos[i * 3 + 1] < groundY) {
+          pos[i * 3 + 1] = topY;
+          const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spanR;
+          pos[i * 3] = Math.cos(a) * r; pos[i * 3 + 2] = Math.sin(a) * r;
+        }
+      }
+      geo.attributes.position.needsUpdate = true;
+    }
+    return { points, tick };
+  }
+
+  let weatherLayers = null, currentWeather = 'clear';
+  function ensureWeatherLayers() {
+    if (weatherLayers) return weatherLayers;
+    const spanR = 90, topY = GROUND_Y + 46, groundY = GROUND_Y - 4;
+    weatherLayers = {
+      rain: makeWeatherLayer('/assets/vfx/raindrop.png', isMobile ? 500 : 1200,
+        { fallMin: 30, fallMax: 42, drift: 0.4, size: 0.55, spanR, topY, groundY, tumble: false }),
+      snow: makeWeatherLayer('/assets/vfx/glow.png', isMobile ? 300 : 650,
+        { fallMin: 1.6, fallMax: 3.0, drift: 1.1, size: 0.4, spanR, topY, groundY, tumble: false }),
+      leaves: makeWeatherLayer('/assets/vfx/leaf.png', isMobile ? 160 : 340,
+        { fallMin: 3.5, fallMax: 5.5, drift: 2.0, size: 0.5, spanR, topY, groundY, tumble: true }),
+    };
+    return weatherLayers;
+  }
+  function setWeather(name) {
+    const layers = ensureWeatherLayers();
+    if (!layers[name] && name !== 'clear') return;
+    currentWeather = layers[name] ? name : 'clear';
+    for (const k in layers) layers[k].points.visible = k === currentWeather;
+  }
+  function tickWeather(dt, now) {
+    if (!weatherLayers || currentWeather === 'clear') return;
+    weatherLayers[currentWeather].tick(dt, now);
+  }
+
+
   const R = 26;
   const edgeTexData = new Uint8Array(48 * 4);
   const edgeTex = new THREE.DataTexture(edgeTexData, 48, 1);
@@ -746,7 +1040,8 @@ export function createGarden(canvas, opts = {}) {
   scene.add(roseHeads, roseStems);
   let revealed = reduced;   // during the intro, roses stay hidden until the wave reaches them
 
-  const goldGlowTex = softCircleTex('rgba(255,214,140,.9)', 'rgba(255,214,140,0)');
+  const goldGlowTex = softCircleTex('rgba(255,214,140,.9)', 'rgba(255,214,140,0)');       // anniversary sparkles
+  const monthsaryGlowTex = softCircleTex('rgba(201,158,230,.85)', 'rgba(201,158,230,0)');  // monthsary bloom halo
   const glowGroup = new THREE.Group(); scene.add(glowGroup);
   const annivGroup = new THREE.Group(); scene.add(annivGroup);
   let annivSpots = [];
@@ -827,10 +1122,10 @@ export function createGarden(canvas, opts = {}) {
       if (mst && mst.kind === 'anniv') {
         annivSpots.push({ x, z, n });
         roseColor.setHex(0xd9455e);
-      } else if (mst) {
-        roseColor.setHex(0xf2c257);
-        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: goldGlowTex, depthWrite: false, transparent: true, opacity: 0.85 }));
-        glow.position.set(x, y + 0.78 * s, z); glow.scale.setScalar(0.9);
+      } else if (mst && mst.kind === 'monthsary') {
+        roseColor.setHex(0xb98ad9);   // lavender — the monthsary bloom, tracked every 13th
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: monthsaryGlowTex, depthWrite: false, transparent: true, opacity: 0.8 }));
+        glow.position.set(x, y + 0.78 * s, z); glow.scale.setScalar(0.78);
         glowGroup.add(glow);
       } else {
         const t = hash2(n, 12.3);
@@ -873,11 +1168,13 @@ export function createGarden(canvas, opts = {}) {
   const lineGroup = new THREE.Group(); lineGroup.name = 'gallery'; scene.add(lineGroup);
   const fireGroup = new THREE.Group(); fireGroup.name = 'burn'; scene.add(fireGroup);
   const tvGroup = new THREE.Group(); tvGroup.name = 'tv'; scene.add(tvGroup);
+  const benchGroup = new THREE.Group(); benchGroup.name = 'bench'; scene.add(benchGroup);
   const hotspots = [
     { group: bookGroup, label: 'open our book', at: new V3(-7.6, 2.4, 5.6), base: new V3(-7.6, 0, 5.6), br: 1.5 },
     { group: lineGroup, label: 'the photographs', at: new V3(7.4, 4.6, -7.6), base: new V3(7.5, 0, -7.5), br: 2.2 },
     { group: fireGroup, label: 'the small fire — for letting go', at: new V3(7.8, 1.8, 6.4), base: new V3(7.8, 0, 6.4), br: 1.4 },
     { group: tvGroup, label: 'the little cinema', at: new V3(-2.3, 2.3, -13.2), base: new V3(-2.3, 0, -13.2), br: 1.6 },
+    { group: benchGroup, label: 'sit together', at: new V3(-9.5, 1.6, -6.5), base: new V3(-9.5, 0, -6.5), br: 1.6 },
   ];
   for (const h of hotspots) { h.at.y += GROUND_Y; h.base.y += GROUND_Y; }
   for (const h of hotspots) h.base.y = terrainY(h.base.x, h.base.z) + 0.06;
@@ -1037,11 +1334,11 @@ export function createGarden(canvas, opts = {}) {
   const photoCards = [];
 
   /* ============== quick settings ============== */
-  const LOAD = { base: true, mountains: true, flowers: true, tv: true, grass: false };  // ← flip to enable/disable
+  const LOAD = { base: true, mountains: true, flowers: true, tv: true, bench: true, grass: false };  // ← flip to enable/disable
   const SKY_TEXTURE_URL = '/assets/env/sky.jpg';  // ← drop any equirect image there, or call garden.setSky(url)
   /* ============================================ */
   setSky(SKY_TEXTURE_URL);                       // applies your sky if the file exists
-  let assetsPending = 5;      // base, nature kit, mountains, flowers, tv
+  let assetsPending = 6;      // base, nature kit, mountains, flowers, tv, bench
   const assetDone = () => { if (--assetsPending <= 0) beginIntro(); };
   setTimeout(() => { if (!ready) beginIntro(); }, 12000);   // never strand the loader
 
@@ -1049,6 +1346,7 @@ export function createGarden(canvas, opts = {}) {
   LOAD.mountains ? loadMountains() : assetDone();
   LOAD.flowers ? loadFlowers() : assetDone();
   LOAD.tv ? loadTV() : assetDone();
+  LOAD.bench ? loadBench() : assetDone();
 
   new GLTFLoader().load('/assets/nature/nature_kit.glb', gltf => {
     const kit = gltf.scene;
@@ -1092,7 +1390,35 @@ export function createGarden(canvas, opts = {}) {
     if (LOAD.grass) scatterCardGrass();   // their BinbunGrass — with a built-in fallback atlas
   }
 
-  /* ------------- the little cinema ------------- */
+  /* ------------- the bench (sit together) ------------- */
+  const BENCH_X = -9.5, BENCH_Z = -6.5, BENCH_SCALE = 1.7;
+  const BENCH_SEAT_EYE_Y = 1.25;     // world units above ground — ~0.75x the app's standing eye height (1.7)
+  const BENCH_SEAT_X_OFF = 0.55;     // how far left/right of bench-centre each seat sits
+  const benchYaw = Math.atan2(BENCH_X - 0, BENCH_Z - 0);   // faces outward, away from the island centre
+  const benchSeats = [
+    { local: -1 }, { local: 1 },
+  ].map(s => {
+    const dx = Math.cos(benchYaw) * BENCH_SEAT_X_OFF * s.local;
+    const dz = -Math.sin(benchYaw) * BENCH_SEAT_X_OFF * s.local;
+    return {
+      pos: new V3(BENCH_X + dx, terrainY(BENCH_X, BENCH_Z) + BENCH_SEAT_EYE_Y, BENCH_Z + dz),
+      yaw: benchYaw,
+    };
+  });
+  function loadBench() {
+    new GLTFLoader().load('/assets/bench/couple_bench.glb', gltf => {
+      const setup = gltf.scene;
+      setup.traverse(o => { if (o.isMesh) { o.castShadow = useShadows; o.receiveShadow = useShadows; } });
+      setup.scale.setScalar(BENCH_SCALE);
+      setup.rotation.y = benchYaw;
+      setup.position.set(BENCH_X, terrainY(BENCH_X, BENCH_Z), BENCH_Z);
+      benchGroup.add(setup);
+      addKeepOut(BENCH_X, BENCH_Z, 1.1);
+      assetDone();
+    }, undefined, () => assetDone());
+  }
+
+
   const TV = { state: 'off', mesh: null, mat: null, video: null, tex: null, light: null, onEnded: null };
   const tvStatic = (() => {
     const c = document.createElement('canvas'); c.width = 160; c.height = 120;
@@ -1408,8 +1734,49 @@ export function createGarden(canvas, opts = {}) {
     }
     return null;
   }
+  /* ------------- sitting together (first-person bench view) ------------- */
+  let sitting = false, seatYaw = 0, seatPitch = -0.05;
+  let lookDragging = false, lookLastX = 0, lookLastY = 0;
+  let preSitCamPos = null, preSitTarget = null;
+  const LOOK_SENS = 0.0042;
+  const PITCH_MIN = -1.1, PITCH_MAX = 1.48;   // generous upward range — for watching the sky
+
+  function sitDown(seatIndex) {
+    if (sitting) return;
+    const seat = benchSeats[seatIndex] ?? benchSeats[0];
+    preSitCamPos = camera.position.clone();
+    preSitTarget = controls.target.clone();
+    sitting = true;
+    controls.enabled = false;
+    hovered = null; canvas.style.cursor = ''; if (labelEl) labelEl.hidden = true;
+    camera.position.copy(seat.pos);
+    seatYaw = seat.yaw; seatPitch = -0.05;
+    camera.quaternion.setFromEuler(new THREE.Euler(seatPitch, seatYaw, 0, 'YXZ'));
+  }
+  function sitTogether() {
+    if (sitting) return;
+    const idx = camera.position.distanceTo(benchSeats[0].pos) <= camera.position.distanceTo(benchSeats[1].pos) ? 0 : 1;
+    sitDown(idx);
+  }
+  function standUp() {
+    if (!sitting) return;
+    sitting = false;
+    controls.enabled = true;
+    if (preSitCamPos) camera.position.copy(preSitCamPos);
+    if (preSitTarget) controls.target.copy(preSitTarget);
+    preSitCamPos = preSitTarget = null;
+  }
+
   canvas.addEventListener('pointermove', e => {
     pointerMoved = true;
+    if (sitting) {
+      if (lookDragging) {
+        seatYaw -= (e.clientX - lookLastX) * LOOK_SENS;
+        seatPitch = THREE.MathUtils.clamp(seatPitch - (e.clientY - lookLastY) * LOOK_SENS, PITCH_MIN, PITCH_MAX);
+        lookLastX = e.clientX; lookLastY = e.clientY;
+      }
+      return;
+    }
     if (e.pointerType === 'touch') return;
     const h = pickHotspot(e.clientX, e.clientY);
     if (h !== hovered) {
@@ -1421,8 +1788,12 @@ export function createGarden(canvas, opts = {}) {
       }
     }
   });
-  canvas.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY, performance.now()]; });
+  canvas.addEventListener('pointerdown', e => {
+    downAt = [e.clientX, e.clientY, performance.now()];
+    if (sitting) { lookDragging = true; lookLastX = e.clientX; lookLastY = e.clientY; }
+  });
   canvas.addEventListener('pointerup', e => {
+    if (sitting) { lookDragging = false; downAt = null; return; }
     if (!downAt) return;
     const [x, y, t] = downAt; downAt = null;
     if (Math.hypot(e.clientX - x, e.clientY - y) > 9 || performance.now() - t > 450) return;
@@ -1520,7 +1891,12 @@ export function createGarden(canvas, opts = {}) {
     if (cardGrass) cardGrass.userData.mat.uniforms.uTime.value = now;
 
     if (ready && !introDone && introStart != null) updateIntro(now);
-    if (introDone) controls.update();
+    tickNight(dt);
+    tickFireworks(dt);
+    tickFireworksAlways(dt);
+    tickWeather(dt, now);
+    if (sitting) camera.quaternion.setFromEuler(new THREE.Euler(seatPitch, seatYaw, 0, 'YXZ'));
+    else if (introDone) controls.update();
 
     // ambient motion
     if (!reduced) {
@@ -1639,6 +2015,9 @@ export function createGarden(canvas, opts = {}) {
   return {
     setSky,
     tv: { play: tvPlay, toggle: tvToggle, stop: tvStop, state: () => TV.state },
+    bench: { sit: sitTogether, stand: standUp, isSitting: () => sitting },
+    fireworks: { start: startFireworks, stop: stopFireworks, active: () => fwActive },
+    setWeather,
     setPhotos,
     setDay(days, ms, animateNew = false) {
       plantRoses(days, ms, animateNew);

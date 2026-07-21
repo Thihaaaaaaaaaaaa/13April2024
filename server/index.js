@@ -250,7 +250,7 @@ function seatHolders() {
     .map(([id]) => id);
 }
 
-function touchSession(sessionId, profile, editing) {
+function touchSession(sessionId, profile, editing, sitting) {
   if (!sessionId) return;
   const now = Date.now();
   const s = sessions.get(sessionId);
@@ -258,9 +258,25 @@ function touchSession(sessionId, profile, editing) {
     s.last = now;
     if (profile) s.profile = profile;
     if (editing != null) s.editing = !!editing;
+    if (sitting != null) s.sitting = !!sitting;
   } else {
-    sessions.set(sessionId, { profile: profile || null, editing: !!editing, first: now, last: now });
+    sessions.set(sessionId, { profile: profile || null, editing: !!editing, sitting: !!sitting, first: now, last: now });
   }
+}
+
+// the bench: once two distinct logged-in partners are both seated, the moment is timestamped
+// here on the server so every client's countdown reads from the same clock, not their own.
+let bothSeatedAt = null;
+function updateBench() {
+  pruneSessions();
+  const sitters = new Set();
+  for (const s of sessions.values()) {
+    if (s.sitting && s.editing && NAMES.includes(s.profile)) sitters.add(s.profile);
+  }
+  const bothSeated = sitters.size >= 2;
+  if (bothSeated && bothSeatedAt == null) bothSeatedAt = Date.now();
+  if (!bothSeated) bothSeatedAt = null;
+  return bothSeatedAt;
 }
 
 /* ---------------------------------------------------------------- */
@@ -345,16 +361,17 @@ app.post('/api/auth', (req, res) => {
 });
 
 app.post('/api/presence', (req, res) => {
-  const { sessionId, profile, editing } = req.body || {};
+  const { sessionId, profile, editing, sitting } = req.body || {};
   if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 64) {
     return res.status(400).json({ error: 'A session id is needed.' });
   }
-  touchSession(sessionId, NAMES.includes(profile) ? profile : null, editing);
+  touchSession(sessionId, NAMES.includes(profile) ? profile : null, editing, sitting);
   const holders = seatHolders();
+  const bench = updateBench();
   const online = [...sessions.entries()].map(([id, s]) => ({
-    profile: s.profile, editing: !!s.editing, seated: holders.includes(id), you: id === sessionId,
+    profile: s.profile, editing: !!s.editing, seated: holders.includes(id), sitting: !!s.sitting, you: id === sessionId,
   }));
-  res.json({ seat: holders.includes(sessionId), seats: MAX_SEATS, online });
+  res.json({ seat: holders.includes(sessionId), seats: MAX_SEATS, online, bothSeatedAt: bench, serverNow: Date.now() });
 });
 
 /* -------- memories (photos & videos) -------- */
@@ -369,8 +386,15 @@ app.post('/api/memories', requireEditor,
     try {
       const file = req.files && req.files.file && req.files.file[0];
       if (!file) return res.status(400).json({ error: 'No file arrived. Choose a photo or a video first.' });
-      const mime = file.mimetype || '';
-      const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : null;
+      let mime = file.mimetype || '';
+      let kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : null;
+      if (!kind) {
+        // some phones/pickers send '' or 'application/octet-stream' for real media —
+        // fall back to the file extension rather than reject a genuine upload
+        const name = (file.originalname || '').toLowerCase();
+        if (/\.(mp4|mov|m4v|webm|mkv|avi|3gp|3gpp)$/.test(name)) { kind = 'video'; mime = 'video/mp4'; }
+        else if (/\.(jpe?g|png|webp|gif|heic|heif|bmp)$/.test(name)) { kind = 'image'; mime = 'image/jpeg'; }
+      }
       if (!kind) return res.status(415).json({ error: 'Only photos and videos can hang on the line.' });
 
       const thumbFile = req.files.thumb && req.files.thumb[0];

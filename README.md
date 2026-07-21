@@ -92,6 +92,37 @@ saved, and the site tells you so.
 
 ---
 
+## Recent additions
+
+- **Sit together** — a couple's bench near the shore. Click it and you go
+  first-person: free mouse/touch look, wide enough range to look straight up
+  at the sky. Stand up any time from the little chip, or press Esc.
+- **The fireworks** — when both of you are logged in and sitting on the bench
+  at the same time, a 5-second countdown appears (timed by the server, so it
+  can't drift between two phones/laptops), then the sky darkens and a large,
+  wide-based fireworks show launches — hundreds of sparks per burst, bonus
+  flash bursts, all fading back to the normal twilight after.
+- **Weather** — logged-in users only get a ⚙️ weather button in the top-right
+  HUD, with clear/rain/snow/falling-leaves options. It's a personal display
+  choice, not something forced on visitors.
+
+- **Monthsaries** — every 13th of the month blooms as its own lavender rose 💜
+  in the spiral, counted up from day one ("1 month today", "2 months
+  today"…). The old fixed-day gold milestones (day 100, 200…) are gone —
+  replaced entirely by this, since you actually track monthsaries. The
+  yearly 13 April anniversary is unchanged: still the full glass-dome rose 🌹.
+- **The calendar** — open **📅 by day** from the photo line to browse a real
+  month grid. Anniversary and monthsary days are marked right on the grid;
+  click any day to see every picture taken that day, and add more straight
+  to that date — the app has always supported multiple photos per day, this
+  just gives you a way to browse them that way.
+- **Video uploads** — fixed a real bug: phones and some file pickers send a
+  blank or generic MIME type for real videos, which was silently rejecting
+  them. Both the browser upload and the server now fall back to the file
+  extension (`.mp4`, `.mov`, `.webm`, etc.) so those uploads go through.
+
+---
+
 ## Changing things
 
 | What | Where |
@@ -99,9 +130,10 @@ saved, and the site tells you so.
 | Password | `EDIT_PASSWORD` env var on Render (Environment tab) → redeploy |
 | Anniversary date | `ANNIVERSARY=YYYY-MM-DD` env var (default 2024-04-13) |
 | Names | `NAMES=Lina,Thiha` env var, and the avatars/labels in `public/index.html` + `public/js/config.js` |
-| Milestone days | `milestoneSet()` in `public/js/config.js` |
+| Monthsary / anniversary logic | `milestoneSet()` in `public/js/config.js` |
 | Colors & type | CSS variables at the top of `public/css/style.css` |
 | Garden layout | `kitPlacements` (trees/rocks/bushes) and object positions in `public/js/garden.js` |
+
 
 The rose spiral scales itself: day 826 sits ~10 units from the heart, day 2000
 ~16 — still inside the island. It's built to keep blooming for years.
@@ -125,6 +157,11 @@ The rose spiral scales itself: day 826 sits ~10 units from the heart, day 2000
   `public/assets/flowers/CREDITS.txt`; a donation to them is a lovely gesture
 - **Retro TV setup** — user-supplied "Retro_TV_Setup" pack (textures/model
   as provided; see the pack's SuggestedTextureSetting.txt)
+- **Couple's bench** — "Park Benches" by GreyFrogGames, CC BY 4.0
+  (`public/assets/bench/LICENSE.txt`)
+- **Fireworks & weather particles** — Brackeys VFX Bundle (sparks, flares,
+  burst flipbook) and "VFX Pack" by Brady Games (raindrop, leaf) — see
+  `public/assets/vfx/CREDITS.txt`
 - **Grass sprites & clouds** — from the couple's own BinbunGrass pack and
   Godot sky shader, ported to Three.js (`public/assets/env/CREDITS.txt`)
 - **The sea** — written for this garden (your SeaWaterMaterial zip is

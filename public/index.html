@@ -87,10 +87,31 @@
   </div>
   <div class="hud-right">
     <div id="hud-presence" class="hud-presence" aria-live="polite"></div>
+    <button id="hud-settings" class="hud-chip" type="button" title="Choose the weather" hidden>⚙️ weather</button>
     <button id="hud-sound" class="hud-chip" type="button" aria-pressed="false" title="Play the garden's sound">🔇 sound</button>
     <button id="hud-lock" class="hud-chip" type="button" title="Switch person or lock the gate">👤 <span id="hud-me">—</span></button>
   </div>
 </header>
+
+<div id="weather-panel" class="weather-panel" hidden>
+  <p class="weather-panel-title">choose the weather</p>
+  <div class="weather-opts">
+    <button class="weather-opt" data-weather="clear" type="button">☀️ clear</button>
+    <button class="weather-opt" data-weather="rain" type="button">🌧️ rain</button>
+    <button class="weather-opt" data-weather="snow" type="button">❄️ snow</button>
+    <button class="weather-opt" data-weather="leaves" type="button">🍂 leaves</button>
+  </div>
+</div>
+
+<div id="bench-controls" class="tv-controls" hidden>
+  <span id="bench-status" class="tvc-title">sitting together</span>
+  <button id="bench-stand" class="tvc-btn" aria-label="stand up">⏻</button>
+</div>
+
+<div id="bench-countdown" class="bench-countdown" hidden>
+  <span id="bench-countdown-num">5</span>
+  <span class="bench-countdown-label">until the sky lights up</span>
+</div>
 
 <div id="ghost-note" class="ghost-note" hidden>
   the garden seats two, and both chairs are taken — you're drifting through as a ghost 👻 (looking only)
@@ -134,10 +155,33 @@
   <button class="overlay-close" data-close type="button" aria-label="Leave the line">✕</button>
   <header class="gallery-head">
     <h2 class="overlay-title">photographs on the line</h2>
-    <button id="gallery-add" class="btn btn-rose" type="button" hidden>+ hang something new</button>
+    <span class="gallery-head-actions">
+      <button id="gallery-calendar" class="btn" type="button">📅 by day</button>
+      <button id="gallery-add" class="btn btn-rose" type="button" hidden>+ hang something new</button>
+    </span>
   </header>
   <div id="gallery-lines" class="gallery-lines" tabindex="0"></div>
   <p id="gallery-empty" class="empty-note" hidden>no photographs on the line yet — hang the first one.</p>
+</section>
+
+<section id="calendar" class="overlay overlay-wide" hidden aria-modal="true" role="dialog" aria-label="Calendar">
+  <button class="overlay-close" data-close type="button" aria-label="Close calendar">✕</button>
+  <header class="gallery-head">
+    <h2 class="overlay-title">every day, gathered</h2>
+    <span class="cal-nav">
+      <button id="cal-prev" class="btn" type="button" aria-label="previous month">‹</button>
+      <span id="cal-label" class="cal-label"></span>
+      <button id="cal-next" class="btn" type="button" aria-label="next month">›</button>
+    </span>
+  </header>
+  <div id="cal-grid" class="cal-grid"></div>
+  <div id="cal-day" class="cal-day" hidden>
+    <div class="cal-day-head">
+      <h3 id="cal-day-title"></h3>
+      <button id="cal-day-add" class="btn btn-rose" type="button" hidden>+ add pictures for this day</button>
+    </div>
+    <div id="cal-day-grid" class="gallery-lines cal-day-grid"></div>
+  </div>
 </section>
 
 <!-- upload -->

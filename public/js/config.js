@@ -32,18 +32,34 @@ export function msToNextDay(now = new Date()) {
 
 /* Milestones — day counts and yearly anniversaries. Gold roses. */
 export function milestoneSet(maxDay) {
-  // day -> { label, kind }  ·  kind: 'anniv' (a very special flower) | 'gold'
+  // day -> { label, kind }  ·  kind: 'anniv' (yearly, 13 Apr — the glass-dome rose)
+  //                                | 'monthsary' (every other 13th-of-the-month — the lavender bloom)
   const ms = new Map();
-  const golds = [100, 200, 300, 500, 730, 1000, 1500, 2000, 2500, 3000];
-  for (const d of golds) if (d <= maxDay) ms.set(d, { label: `day ${d} of us`, kind: 'gold' });
   const start = startMidnight();
-  const ord = n => n + (['th','st','nd','rd'][(n%100>>3^1&&n%10)||0] || 'th');
+  const ord = n => n + (['th', 'st', 'nd', 'rd'][(n % 100 >> 3 ^ 1 && n % 10) || 0] || 'th');
+
+  // yearly anniversaries first — they take priority on any day they land on
   for (let y = 1; y <= 30; y++) {
     const a = new Date(start);
     a.setFullYear(a.getFullYear() + y);
     const d = Math.round((a - start) / 86400000) + 1;
     if (d > maxDay) break;
     ms.set(d, { label: `our ${ord(y)} year`, kind: 'anniv' });
+  }
+
+  // monthsaries — every 13th of the month you two actually track, skipping the day that's already an anniversary
+  let monthCount = 0;
+  const cursor = new Date(start);
+  cursor.setDate(13);
+  if (cursor <= start) cursor.setMonth(cursor.getMonth() + 1);   // day 1 itself is not a monthsary
+  for (let guard = 0; guard < 400; guard++) {
+    const d = Math.round((cursor - start) / 86400000) + 1;
+    if (d > maxDay) break;
+    if (d >= 1) {
+      monthCount++;
+      if (!ms.has(d)) ms.set(d, { label: `${monthCount} month${monthCount === 1 ? '' : 's'} today 💜`, kind: 'monthsary' });
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
   }
   return ms;
 }

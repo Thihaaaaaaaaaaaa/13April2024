@@ -4,7 +4,7 @@
    ================================================================== */
 
 import { CONFIG, dayNumber, msToNextDay, milestoneSet, fmtDate, startMidnight } from './config.js';
-import { api, session, state, mediaUrl, startHeartbeat, onPresence } from './api.js';
+import { api, session, state, mediaUrl, startHeartbeat, onPresence, pokePresence } from './api.js';
 import { createGarden } from './garden.js';
 import { runBurnRitual } from './burn.js';
 import { createAmbient } from './ambient.js';
@@ -20,6 +20,9 @@ const el = {
   gateVisit: $('#gate-visit'), gateBack: $('#gate-back'),
   hud: $('#hud'), hudDay: $('#hud-daynum'), hudCountdown: $('#hud-countdown'),
   hudPresence: $('#hud-presence'), hudSound: $('#hud-sound'), hudLock: $('#hud-lock'), hudMe: $('#hud-me'),
+  hudSettings: $('#hud-settings'), weatherPanel: $('#weather-panel'),
+  benchControls: $('#bench-controls'), benchStand: $('#bench-stand'), benchStatus: $('#bench-status'),
+  benchCountdown: $('#bench-countdown'), benchCountdownNum: $('#bench-countdown-num'),
   ghostNote: $('#ghost-note'),
   journal: $('#journal'), bookLeft: $('#book-left'), bookRight: $('#book-right'),
   bookPrev: $('#book-prev'), bookNext: $('#book-next'), bookWhere: $('#book-where'), bookWrite: $('#book-write'),
@@ -28,6 +31,9 @@ const el = {
   writerTitle: $('#writer-title'), writerMoods: $('#writer-moods'), writerBody: $('#writer-body'),
   writerAuthor: $('#writer-author'), writerError: $('#writer-error'),
   gallery: $('#gallery'), galleryLines: $('#gallery-lines'), galleryEmpty: $('#gallery-empty'), galleryAdd: $('#gallery-add'),
+  galleryCalendar: $('#gallery-calendar'),
+  calendar: $('#calendar'), calGrid: $('#cal-grid'), calLabel: $('#cal-label'), calPrev: $('#cal-prev'), calNext: $('#cal-next'),
+  calDay: $('#cal-day'), calDayTitle: $('#cal-day-title'), calDayGrid: $('#cal-day-grid'), calDayAdd: $('#cal-day-add'),
   uploader: $('#uploader'), drop: $('#drop'), fileInput: $('#file-input'), uploadList: $('#upload-list'),
   uploadCaption: $('#upload-caption'), uploadDate: $('#upload-date'), uploadGo: $('#upload-go'), uploadStatus: $('#upload-status'),
   viewer: $('#viewer'), viewerMedia: $('#viewer-media'), viewerCaption: $('#viewer-caption'),
@@ -188,6 +194,7 @@ onPresence((st, seatChanged) => {
   lastSeen = seen;
   el.ghostNote.hidden = st.seat;
   if (seatChanged) updateEditingUI();
+  updateBenchCountdown(st);
 });
 
 function updateEditingUI() {
@@ -195,8 +202,18 @@ function updateEditingUI() {
   el.bookWrite.hidden = !editing;
   el.galleryAdd.hidden = !editing;
   el.viewerBurn.hidden = !editing;
+  el.hudSettings.hidden = !editing;   // weather is a logged-in-only setting
+  if (!editing) el.weatherPanel.hidden = true;
   el.hudMe.textContent = session.profile ? `${CONFIG.profiles[session.profile]?.emoji || ''} ${session.profile}` : 'someone';
 }
+
+/* ---------------- weather settings (editors only) ---------------- */
+el.hudSettings.addEventListener('click', () => { el.weatherPanel.hidden = !el.weatherPanel.hidden; });
+$$('.weather-opt').forEach(b => b.addEventListener('click', () => {
+  garden.setWeather(b.dataset.weather);
+  $$('.weather-opt').forEach(o => o.classList.toggle('active', o === b));
+  el.weatherPanel.hidden = true;
+}));
 
 /* ---------------- overlays ---------------- */
 const areas = { journal: el.journal, gallery: el.gallery, burn: el.burnpick, tv: el.tvguide };
@@ -216,13 +233,65 @@ function openArea(name) {
     if (garden.tv.state() === 'play') { onTvToggle(); return; }   // tapping the set = pause/resume
     renderTVGuide(); el.tvguide.hidden = false;
   }
+  if (name === 'bench') sitOnBench();
+}
+
+/* ==================================================================
+   sitting together — first-person bench, synced countdown, fireworks
+   ================================================================== */
+let firedForSeatedAt = null;
+
+function sitOnBench() {
+  if (garden.bench.isSitting()) return;
+  closeAllOverlays();
+  garden.bench.sit();
+  state.sitting = true;
+  pokePresence();
+  el.benchStatus.textContent = `${CONFIG.profiles[session.profile]?.emoji || ''} sitting — look around, look up`;
+  el.benchControls.hidden = false;
+}
+function standUpFromBench() {
+  if (!garden.bench.isSitting()) return;
+  garden.bench.stand();
+  state.sitting = false;
+  pokePresence();
+  el.benchControls.hidden = true;
+  el.benchCountdown.hidden = true;
+}
+el.benchStand.addEventListener('click', standUpFromBench);
+
+function updateBenchCountdown(st) {
+  if (st.bothSeatedAt == null) {
+    el.benchCountdown.hidden = true;
+    if (firedForSeatedAt !== null) firedForSeatedAt = null;   // the moment was cancelled — someone stood up
+    return;
+  }
+  if (firedForSeatedAt === st.bothSeatedAt) { el.benchCountdown.hidden = true; return; }   // already fired
+  const elapsedMs = (st.serverNow ?? Date.now()) - st.bothSeatedAt;
+  const remain = Math.ceil((5000 - elapsedMs) / 1000);
+  if (remain > 0) {
+    el.benchCountdown.hidden = false;
+    if (el.benchCountdownNum.textContent !== String(remain)) {
+      el.benchCountdownNum.textContent = String(remain);
+      el.benchCountdownNum.style.animation = 'none';
+      void el.benchCountdownNum.offsetWidth;
+      el.benchCountdownNum.style.animation = '';
+    }
+  } else {
+    firedForSeatedAt = st.bothSeatedAt;
+    el.benchCountdown.hidden = true;
+    garden.fireworks.start(24);
+    toast('🎆 the sky is yours tonight');
+  }
 }
 $$('[data-close]').forEach(b => b.addEventListener('click', () => {
   b.closest('.overlay').hidden = true;
 }));
 addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (garden.bench.isSitting()) { standUpFromBench(); return; }
     if (garden.tv.state() === 'play') { garden.tv.stop(); el.tvControls.hidden = true; return; }
+    if (!el.weatherPanel.hidden) { el.weatherPanel.hidden = true; return; }
     const open = $$('.overlay').filter(o => !o.hidden);
     if (open.length) open[open.length - 1].hidden = true;
   }
@@ -260,8 +329,8 @@ function openingSheetHTML() {
     <p class="page-date">since ${fmtDate(startMidnight())} — day ${d} of us</p>
     <p class="page-body">one rose in the garden for every day we've had. this book keeps the rest: the pictures on the line, the pages we write, and the things we chose to let the fire hold.</p>
     <ul class="mile-list">
-      ${past.map(([day, m]) => `<li><span class="gold">${m.kind === 'anniv' ? '🌹' : '✦'} ${m.label}</span><span>${dateOf(day)}</span></li>`).join('')}
-      ${next.map(([day, m]) => `<li class="soon"><span>${m.kind === 'anniv' ? '🥀' : '◦'} ${m.label}</span><span>${dateOf(day)} · in ${day - d} days</span></li>`).join('')}
+      ${past.map(([day, m]) => `<li><span class="${m.kind === 'anniv' ? 'gold' : 'lav'}">${m.kind === 'anniv' ? '🌹' : '💜'} ${m.label}</span><span>${dateOf(day)}</span></li>`).join('')}
+      ${next.map(([day, m]) => `<li class="soon"><span>${m.kind === 'anniv' ? '🥀' : '🪻'} ${m.label}</span><span>${dateOf(day)} · in ${day - d} days</span></li>`).join('')}
     </ul>
     ${smoke.length ? `<p class="page-kicker" style="margin-top:18px">kept in smoke</p>
       <ul class="smoke-list">${smoke.map(s => `<li>${escapeHtml(s.what)} — ${fmtDate(s.when)}</li>`).join('')}</ul>` : ''}
@@ -376,6 +445,7 @@ function polaroidHTML(m) {
 }
 
 function renderGallery() {
+  viewList = null;   // back to full-gallery prev/next navigation
   const vis = visibleMemories();
   el.galleryEmpty.hidden = vis.length > 0;
   el.galleryLines.innerHTML = '';
@@ -400,8 +470,10 @@ function renderGallery() {
 
 /* ---- viewer ---- */
 let viewIdx = 0;
-function openViewer(i) {
-  const vis = visibleMemories();
+let viewList = null;   // when set (e.g. from the calendar), prev/next stay within this subset
+function openViewer(i, list = null) {
+  if (list) viewList = list;
+  const vis = viewList || visibleMemories();
   if (!vis.length) return;
   viewIdx = (i + vis.length) % vis.length;
   const m = vis[viewIdx];
@@ -427,6 +499,102 @@ function openViewer(i) {
 el.viewerPrev.addEventListener('click', () => openViewer(viewIdx - 1));
 el.viewerNext.addEventListener('click', () => openViewer(viewIdx + 1));
 el.galleryAdd.addEventListener('click', () => { resetUploader(); el.uploader.hidden = false; });
+
+/* ==================================================================
+   the calendar — every day, with all its pictures gathered
+   ================================================================== */
+const dateKey = m => String(m.taken_on || m.created_at).slice(0, 10);
+const localKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+let calMonth = new Date(); calMonth.setDate(1);
+
+function memoriesByDay() {
+  const map = new Map();
+  for (const m of visibleMemories()) {
+    const k = dateKey(m);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(m);
+  }
+  return map;
+}
+
+function renderCalendar() {
+  el.calDay.hidden = true;
+  const byDay = memoriesByDay();
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  el.calLabel.textContent = calMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  const start = startMidnight();
+  const first = new Date(y, mo, 1);
+  const daysInMonth = new Date(y, mo + 1, 0).getDate();
+  const todayKey = localKey(new Date());
+
+  el.calGrid.innerHTML = '';
+  for (const dow of ['S', 'M', 'T', 'W', 'T', 'F', 'S']) {
+    const h = document.createElement('div'); h.className = 'cal-dow'; h.textContent = dow;
+    el.calGrid.appendChild(h);
+  }
+  for (let i = 0; i < first.getDay(); i++) {
+    const pad = document.createElement('div'); pad.className = 'cal-cell empty';
+    el.calGrid.appendChild(pad);
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(y, mo, day);
+    const key = localKey(date);
+    const dayNum = Math.round((date - start) / 86400000) + 1;
+    const mst = dayNum >= 1 ? milestoneSet(Math.max(dayNum, 1)).get(dayNum) : null;
+    const mems = byDay.get(key) || [];
+
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cal-cell' + (mems.length ? ' has-mem' : '') + (key === todayKey ? ' is-today' : '');
+    b.innerHTML = `<span>${day}</span>` +
+      (mst ? `<span class="cal-icon">${mst.kind === 'anniv' ? '🌹' : '💜'}</span>` : '') +
+      (mems.length ? `<span class="cal-dot">${mems.length} 📷</span>` : '');
+    b.title = mst ? mst.label : '';
+    b.addEventListener('click', () => openCalDay(key, date, mems, mst));
+    el.calGrid.appendChild(b);
+  }
+}
+
+function openCalDay(key, date, mems, mst) {
+  el.calDay.hidden = false;
+  el.calDayTitle.textContent = (mst ? `${mst.kind === 'anniv' ? '🌹' : '💜'} ${mst.label} · ` : '') +
+    date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  el.calDayGrid.innerHTML = '';
+  if (!mems.length) {
+    const p = document.createElement('p'); p.className = 'empty-note';
+    p.textContent = 'nothing kept from this day — yet.';
+    el.calDayGrid.appendChild(p);
+  } else {
+    const row = document.createElement('div'); row.className = 'rope-row';
+    for (const m of mems) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'polaroid';
+      b.style.setProperty('--tilt', `${((m.id * 47) % 9) - 4}deg`);
+      b.innerHTML = polaroidHTML(m);
+      b.addEventListener('click', () => openViewer(mems.indexOf(m), mems));
+      row.appendChild(b);
+    }
+    el.calDayGrid.appendChild(row);
+  }
+  el.calDayAdd.hidden = !state.editing;
+  el.calDayAdd.onclick = () => {
+    resetUploader();
+    el.uploadDate.value = key;
+    el.calendar.hidden = true;
+    el.uploader.hidden = false;
+  };
+}
+
+el.calPrev.addEventListener('click', () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCalendar(); });
+el.calNext.addEventListener('click', () => { calMonth.setMonth(calMonth.getMonth() + 1); renderCalendar(); });
+el.galleryCalendar.addEventListener('click', () => {
+  calMonth = new Date(); calMonth.setDate(1);
+  el.gallery.hidden = true;
+  renderCalendar();
+  el.calendar.hidden = false;
+});
 
 /* ==================================================================
    uploading
@@ -491,19 +659,35 @@ function videoThumb(file) {
   });
 }
 
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|mkv|avi|3gp|3gpp)$/i;
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|heif|bmp)$/i;
+// phones and file pickers frequently hand us '' or 'application/octet-stream' for real
+// photos/videos — fall back to the extension so those uploads aren't silently dropped
+function sniffKind(f) {
+  if (f.type.startsWith('image/')) return 'image';
+  if (f.type.startsWith('video/')) return 'video';
+  if (VIDEO_EXT.test(f.name)) return 'video';
+  if (IMAGE_EXT.test(f.name)) return 'image';
+  return null;
+}
+
 async function addFiles(files) {
   for (const f of files) {
-    if (f.type.startsWith('image/')) {
+    const kind = sniffKind(f);
+    if (kind === 'image') {
       el.uploadStatus.textContent = 'softening the photo…';
       try {
         const { full, thumb } = await shrinkImage(f);
         pushQueued(full, thumb, 'image');
       } catch { toast(`couldn't read ${f.name}`, true); }
-    } else if (f.type.startsWith('video/')) {
+    } else if (kind === 'video') {
       if (f.size > 60 * 1024 * 1024) { toast(`${f.name} is heavier than 60 MB`, true); continue; }
       el.uploadStatus.textContent = 'catching a frame from the video…';
       const thumb = await videoThumb(f);
-      pushQueued(f, thumb, 'video');
+      // if the browser never told us a proper video MIME type, tag the upload
+      // ourselves so the server classifies it correctly too
+      const tagged = f.type.startsWith('video/') ? f : new File([f], f.name, { type: 'video/mp4' });
+      pushQueued(tagged, thumb, 'video');
     } else toast(`${f.name} isn't a photo or a video`, true);
   }
   el.uploadStatus.textContent = queue.length ? `${queue.length} ready to hang` : '';

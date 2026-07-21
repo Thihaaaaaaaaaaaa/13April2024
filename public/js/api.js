@@ -21,6 +21,9 @@ export const state = {
   config: null,
   seat: true,
   online: [],
+  sitting: false,
+  bothSeatedAt: null,   // server-timestamp: when the 2nd logged-in partner sat down (authoritative clock)
+  serverNow: null,
   get editing() { return !!session.token && state.seat; },
 };
 
@@ -49,7 +52,7 @@ export const api = {
   login: password => jfetch('/api/auth', { method: 'POST', headers: headers(), body: JSON.stringify({ password }) }),
   presence: () => jfetch('/api/presence', {
     method: 'POST', headers: headers(),
-    body: JSON.stringify({ sessionId: session.id, profile: session.profile, editing: !!session.token }),
+    body: JSON.stringify({ sessionId: session.id, profile: session.profile, editing: !!session.token, sitting: !!state.sitting }),
   }),
   memories: () => jfetch('/api/memories'),
   pages: () => jfetch('/api/pages'),
@@ -94,18 +97,31 @@ const listeners = new Set();
 export function onPresence(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
 let beatTimer = null;
+let beating = false;
+async function beat() {
+  if (beating) return;
+  beating = true;
+  try {
+    const p = await api.presence();
+    const seatChanged = state.seat !== p.seat;
+    state.seat = p.seat;
+    state.online = p.online || [];
+    state.bothSeatedAt = p.bothSeatedAt ?? null;
+    state.serverNow = p.serverNow ?? Date.now();
+    listeners.forEach(fn => fn(state, seatChanged));
+  } catch { /* offline; keep last known state */ }
+  beating = false;
+}
 export function startHeartbeat() {
-  const beat = async () => {
-    try {
-      const p = await api.presence();
-      const seatChanged = state.seat !== p.seat;
-      state.seat = p.seat;
-      state.online = p.online || [];
-      listeners.forEach(fn => fn(state, seatChanged));
-    } catch { /* offline; keep last known state */ }
-  };
   beat();
   clearInterval(beatTimer);
-  beatTimer = setInterval(beat, 20000);
+  beatTimer = setInterval(beat, state.sitting ? 1000 : 20000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) beat(); });
+}
+// call right after sitting down or standing up so the other browser learns about it
+// within a second, and switch the polling cadence to match
+export function pokePresence() {
+  clearInterval(beatTimer);
+  beatTimer = setInterval(beat, state.sitting ? 1000 : 20000);
+  beat();
 }
